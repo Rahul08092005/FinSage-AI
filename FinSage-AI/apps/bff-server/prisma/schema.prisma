@@ -1,0 +1,22 @@
+// Person 1 (Aditi) owns this file.
+// Phase 1: only the "users" table. More tables (accounts, transactions,
+// budgets, goals, documents...) are added in later phases per the ERD.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String   // bcrypt hash, never store plain text
+  createdAt DateTime @default(now())
+
+  @@map("users")
+}

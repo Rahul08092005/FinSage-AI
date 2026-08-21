@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: finsage-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: finsage
+      POSTGRES_PASSWORD: finsage_dev_pw
+      POSTGRES_DB: finsage_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - finsage_pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: finsage-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  finsage_pg_data:
