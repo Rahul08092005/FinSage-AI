@@ -1,5 +1,5 @@
-import { Card } from "@/components/Card";
 import { Navbar } from "@/components/Navbar";
+import { OverviewCards } from "@/components/OverviewCards";
 import { Sidebar } from "@/components/Sidebar";
 import { getHealth } from "@/lib/api";
 
@@ -17,27 +17,43 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col bg-paper">
       <Navbar />
       <div className="flex flex-1">
         <Sidebar />
-        <main className="flex-1 p-6">
-          <h1 className="text-xl font-semibold text-navy">Dashboard</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Layout, navigation, and component library — Radhika, Phase 1.
-          </p>
-
-          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <Card title="Net Worth" value="₹ —" />
-            <Card title="Monthly Spend" value="₹ —" accent="orange" />
-            <Card title="Financial Health" value="—" />
+        <main className="flex-1 p-6 md:p-8">
+          <div className="border-b border-line pb-4">
+            <h1 className="font-serif text-2xl font-semibold tracking-tight text-ink md:text-3xl">
+              Financial Overview
+            </h1>
+            <p className="mt-1 text-xs text-ink-muted">
+              Live wealth management metrics and system telemetry — Phase 2 Core.
+            </p>
           </div>
 
-          <div className="mt-8 rounded-xl border border-slate-200 bg-white p-5">
-            <h2 className="text-sm font-semibold text-navy">System status (live)</h2>
-            {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+          <OverviewCards />
+
+          <div className="mt-8 rounded-lg border border-line bg-paper-sheet p-6 shadow-subtle">
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <h2 className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                System Telemetry & Health Status
+              </h2>
+              {bffStatus?.status === "ok" && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-teal/30 bg-teal-tint px-2.5 py-0.5 text-[11px] font-semibold text-teal">
+                  <span className="h-1.5 w-1.5 rounded-full bg-teal" />
+                  Live Operational
+                </span>
+              )}
+            </div>
+
+            {error && (
+              <div className="mt-4 rounded-md border border-rose/30 bg-rose-tint p-3 text-xs font-medium text-rose">
+                ⚠ {error}
+              </div>
+            )}
+
             {bffStatus && (
-              <pre className="mt-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+              <pre className="mt-4 overflow-x-auto rounded-md border border-line/70 bg-paper p-4 font-mono text-xs text-ink-muted">
                 {JSON.stringify(bffStatus, null, 2)}
               </pre>
             )}

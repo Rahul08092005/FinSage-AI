@@ -1,6 +1,3 @@
-// Small reusable component-library piece, per Person 4's Phase 1 task
-// ("Component library"). More cards (Net Worth, Goals, etc.) build on this
-// in Phase 2.
 export function Card({
   title,
   value,
@@ -10,11 +7,26 @@ export function Card({
   value: string;
   accent?: "teal" | "orange";
 }) {
-  const accentClass = accent === "teal" ? "border-teal" : "border-orange";
+  const isTeal = accent === "teal";
+
   return (
-    <div className={`rounded-xl border-t-4 ${accentClass} bg-white p-5 shadow-sm`}>
-      <p className="text-sm font-medium text-slate-500">{title}</p>
-      <p className="mt-1 text-2xl font-semibold text-navy">{value}</p>
+    <div className="group rounded-lg border border-line bg-paper-sheet p-5 shadow-subtle transition-all hover:border-line-dark/60">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+          {title}
+        </p>
+        <span
+          className={`h-2 w-2 rounded-full ${
+            isTeal ? "bg-teal/80 ring-4 ring-teal/15" : "bg-gold/80 ring-4 ring-gold/15"
+          }`}
+        />
+      </div>
+
+      <div className="my-3 border-b border-line/70" />
+
+      <p className="font-serif text-2xl font-semibold tracking-tight text-ink tabular-nums lg:text-3xl">
+        {value}
+      </p>
     </div>
   );
 }

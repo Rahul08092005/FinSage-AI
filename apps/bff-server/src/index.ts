@@ -7,6 +7,7 @@ import expensesRoutes from "./routes/expenses.routes";
 import goalsRoutes from "./routes/goals.routes";
 import healthRoutes from "./routes/health.routes";
 import transactionsRoutes from "./routes/transactions.routes";
+import usersRoutes from "./routes/users.routes";
 
 dotenv.config();
 
@@ -18,6 +19,7 @@ app.use(express.json());
 
 app.use("/api/v1/health", healthRoutes);
 app.use("/api/v1/auth", authRoutes);
+app.use("/api/v1/users", usersRoutes);
 app.use("/api/v1/transactions", transactionsRoutes);
 app.use("/api/v1/expenses", expensesRoutes);
 app.use("/api/v1/budgets", budgetsRoutes);
