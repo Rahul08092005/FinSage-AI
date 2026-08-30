@@ -1,3 +1,10 @@
+"""Person 3 (Kavya) owns this file.
+
+Phase 1: the first deterministic calculation function — proves the
+"Person 3 owns the math, Person 2's agents only call it" contract.
+Phase 4 adds calculate_budget_variance, detect_anomalies,
+calculate_health_score, forecast_expenses, calculate_goal_projection.
+"""
 import pandas as pd
 
 
@@ -16,3 +23,25 @@ def calculate_monthly_spending(transactions: pd.DataFrame) -> dict:
     total = round(float(df["amount"].sum()), 2)
 
     return {"by_month": by_month, "by_category": by_category, "total": total}
+
+
+def calculate_category_breakdown(transactions: list[dict]) -> dict:
+    """Person 3, Phase 2: works directly on a list of normalized transaction
+    dicts (as produced by normalization.normalize_batch), so the BFF can send
+    JSON straight from Prisma without a CSV round-trip. Returns spend and
+    percentage share per category.
+    """
+    if not transactions:
+        return {"by_category": {}, "total": 0.0}
+
+    df = pd.DataFrame(transactions)
+    total = round(float(df["amount"].sum()), 2)
+    if total == 0:
+        return {"by_category": {}, "total": 0.0}
+
+    grouped = df.groupby("category")["amount"].sum().round(2)
+    by_category = {
+        cat: {"amount": float(amt), "percent": round(float(amt) / total * 100, 1)}
+        for cat, amt in grouped.items()
+    }
+    return {"by_category": by_category, "total": total}
