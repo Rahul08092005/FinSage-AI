@@ -1,10 +1,3 @@
-"""Person 3 (Kavya) owns this file.
-
-Phase 1: the first deterministic calculation function — proves the
-"Person 3 owns the math, Person 2's agents only call it" contract.
-Phase 4 adds calculate_budget_variance, detect_anomalies,
-calculate_health_score, forecast_expenses, calculate_goal_projection.
-"""
 import pandas as pd
 
 
