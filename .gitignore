@@ -39,3 +39,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Uploaded files (Phase 3 document upload)
+apps/bff-server/uploads/*
+!apps/bff-server/uploads/.gitkeep

@@ -23,6 +23,7 @@ model User {
   transactions Transaction[]
   budgets      Budget[]
   goals        Goal[]
+  documents    Document[]
 
   @@map("users")
 }
@@ -84,4 +85,20 @@ model Goal {
   user User @relation(fields: [userId], references: [id])
 
   @@map("goals")
+}
+
+model Document {
+  id            String   @id @default(uuid())
+  userId        String
+  title         String
+  docType       String   // "receipt" | "bank_statement" | "other"
+  fileUrl       String   // local path for now; swappable for S3 later
+  status        String   @default("QUEUED") // QUEUED|PROCESSING|COMPLETED|NEEDS_REVIEW|FAILED
+  extractedJson Json?
+  confidence    Float?
+  uploadedAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("documents")
 }

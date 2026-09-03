@@ -8,6 +8,11 @@ import goalsRoutes from "./routes/goals.routes";
 import healthRoutes from "./routes/health.routes";
 import transactionsRoutes from "./routes/transactions.routes";
 import usersRoutes from "./routes/users.routes";
+// Phase 3 routes
+import documentsRoutes from "./routes/documents.routes";
+import advisorRoutes from "./routes/advisor.routes";
+import knowledgeRoutes from "./routes/knowledge.routes";
+import analyticsRoutes from "./routes/analytics.routes";
 
 dotenv.config();
 
@@ -17,6 +22,7 @@ const PORT = process.env.PORT || 4000;
 app.use(cors());
 app.use(express.json());
 
+// Phase 1 / 2
 app.use("/api/v1/health", healthRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/users", usersRoutes);
@@ -25,6 +31,13 @@ app.use("/api/v1/expenses", expensesRoutes);
 app.use("/api/v1/budgets", budgetsRoutes);
 app.use("/api/v1/goals", goalsRoutes);
 
+// Phase 3
+app.use("/api/v1/documents", documentsRoutes);
+app.use("/api/v1/advisor", advisorRoutes);
+app.use("/api/v1/knowledge", knowledgeRoutes);
+app.use("/api/v1/analytics", analyticsRoutes);
+
 app.listen(PORT, () => {
   console.log(`[bff-server] listening on http://localhost:${PORT}`);
 });
+
