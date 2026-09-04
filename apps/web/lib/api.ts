@@ -148,3 +148,109 @@ export async function getMonthlySpend(token: string): Promise<number> {
   return Number(data.total) || 0;
 }
 
+export async function uploadDocument(token: string, file: File, docType: string) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("docType", docType);
+
+  const res = await fetch(`${BFF_URL}/api/v1/documents/upload`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: formData,
+  });
+  if (!res.ok) throw new Error("Failed to upload document");
+  return res.json();
+}
+
+export async function getDocuments(token: string) {
+  const res = await fetch(`${BFF_URL}/api/v1/documents`, {
+    headers: authHeaders(token),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error("Failed to load documents");
+  return res.json();
+}
+
+export async function getDocumentStatus(token: string, id: string) {
+  const res = await fetch(`${BFF_URL}/api/v1/documents/${id}`, {
+    headers: authHeaders(token),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error("Failed to load document status");
+  return res.json();
+}
+
+export async function confirmDocument(
+  token: string,
+  id: string,
+  transactions: Array<{
+    amount: number;
+    category: string;
+    transactionDate: string;
+    description: string;
+    accountId?: string;
+  }>
+) {
+  const res = await fetch(`${BFF_URL}/api/v1/documents/${id}/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify({ transactions }),
+  });
+  if (!res.ok) throw new Error("Failed to confirm document");
+  return res.json();
+}
+
+export async function streamAdvisorChat(
+  token: string,
+  message: string,
+  onChunk: (chunk: string) => void,
+  onDone: () => void,
+  onError: (err: any) => void
+) {
+  try {
+    const res = await fetch(`${BFF_URL}/api/v1/advisor/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify({ message }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ error: "Failed to communicate with advisor" }));
+      throw new Error(errData.error?.formErrors?.join(", ") || errData.error || `Advisor request failed (${res.status})`);
+    }
+
+    if (!res.body) {
+      throw new Error("No response body received for streaming");
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n\n");
+      // Keep the incomplete piece in the buffer
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const payload = line.startsWith("data: ") ? line.slice(6) : line.slice(5);
+        if (payload.trim() === "[DONE]") {
+          onDone();
+          return;
+        }
+        onChunk(payload);
+      }
+    }
+    onDone();
+  } catch (err) {
+    onError(err);
+  }
+}
+
+
