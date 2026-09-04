@@ -2,12 +2,19 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const links = [
+interface NavLink {
+  label: string;
+  href: string;
+  disabled?: boolean;
+}
+
+const links: NavLink[] = [
   { label: "Dashboard", href: "/" },
   { label: "Transactions", href: "/transactions" },
   { label: "Budgets", href: "/budgets" },
   { label: "Goals", href: "/goals" },
-  { label: "AI Advisor", href: "#", disabled: true },
+  { label: "Documents", href: "/documents" },
+  { label: "AI Advisor", href: "/advisor" },
 ];
 
 export function Sidebar() {
