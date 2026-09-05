@@ -10,23 +10,14 @@ interface Message {
 }
 
 const PRESET_PROMPTS = [
-  "How much did I spend this month and what is my biggest category?",
+  "How much did I spend on Food this month?",
   "Am I within my monthly budget allocations?",
   "How can I optimize my spending to reach my savings goals faster?",
   "Summarize my recent transactions and highlight any spending anomalies.",
 ];
 
 export function AdvisorChat({ token }: { token: string }) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome-1",
-      role: "advisor",
-      content:
-        "Welcome to your FinSage Advisory Desk. I have direct access to your current month's transactions, active budget allocations, and wealth goals. Ask me any question regarding your cash flow, spending patterns, or budget health.",
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    },
-  ]);
-
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +25,6 @@ export function AdvisorChat({ token }: { token: string }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll to bottom when messages update
   function scrollToBottom() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }
@@ -126,7 +116,7 @@ export function AdvisorChat({ token }: { token: string }) {
               className={`h-1.5 w-1.5 rounded-full ${
                 isStreaming ? "animate-pulse bg-gold" : "bg-teal"
               }`}
-            ></span>
+            />
             {isStreaming ? "Advisor formulating…" : "Ready"}
           </span>
         </div>
@@ -154,6 +144,33 @@ export function AdvisorChat({ token }: { token: string }) {
 
       {/* Message Feed */}
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        {/* Empty State Suggestion */}
+        {messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full border border-teal/40 bg-teal-tint shadow-subtle">
+              <span className="font-serif text-lg font-bold text-teal">FS</span>
+            </div>
+            <h3 className="mt-4 font-serif text-lg font-semibold text-ink">
+              Welcome to the FinSage Advisory Desk
+            </h3>
+            <p className="mt-1 max-w-md text-xs leading-relaxed text-ink-muted">
+              I have direct access to your current month&apos;s ledger records, spending categories, and savings targets.
+            </p>
+            <div className="mt-6 rounded-md border border-line bg-paper/60 p-4 shadow-subtle">
+              <p className="text-xs text-ink-muted">
+                Try asking:{" "}
+                <button
+                  type="button"
+                  onClick={() => handleSend("How much did I spend on Food this month?")}
+                  className="font-serif font-semibold text-teal underline decoration-teal/40 transition hover:text-teal-dark"
+                >
+                  &ldquo;How much did I spend on Food this month?&rdquo;
+                </button>
+              </p>
+            </div>
+          </div>
+        )}
+
         {messages.map((msg) => {
           const isUser = msg.role === "user";
 
@@ -190,7 +207,7 @@ export function AdvisorChat({ token }: { token: string }) {
                 <div className="whitespace-pre-wrap font-sans">
                   {msg.content}
                   {isStreaming && msg.id === messages[messages.length - 1]?.id && (
-                    <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-teal align-middle"></span>
+                    <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-teal align-middle" />
                   )}
                 </div>
               </div>
