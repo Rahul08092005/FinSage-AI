@@ -1,8 +1,8 @@
 "use client";
 import { AuthGate } from "@/components/AuthGate";
+import { DocumentUpload } from "@/components/DocumentUpload";
 import { Navbar } from "@/components/Navbar";
 import { Sidebar } from "@/components/Sidebar";
-import { DocumentsManager } from "@/components/DocumentsManager";
 
 export default function DocumentsPage() {
   return (
@@ -13,14 +13,14 @@ export default function DocumentsPage() {
         <main className="flex-1 p-6 md:p-8">
           <div className="border-b border-line pb-4">
             <h1 className="font-serif text-2xl font-semibold tracking-tight text-ink md:text-3xl">
-              Document Processing & Extraction
+              Document Upload
             </h1>
             <p className="mt-1 text-xs text-ink-muted">
-              Upload statements and receipts for OCR extraction, live processing, and passbook reconciliation.
+              Live OCR extraction, status tracking, and extraction review — Phase 3.
             </p>
           </div>
           <div className="mt-6">
-            <AuthGate>{(token) => <DocumentsManager token={token} />}</AuthGate>
+            <AuthGate>{(token) => <DocumentUpload token={token} />}</AuthGate>
           </div>
         </main>
       </div>
