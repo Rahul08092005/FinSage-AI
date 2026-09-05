@@ -43,3 +43,6 @@ Thumbs.db
 # Uploaded files (Phase 3 document upload)
 apps/bff-server/uploads/*
 !apps/bff-server/uploads/.gitkeep
+
+# ML model pickle (Phase 3 build artifact -- trained locally, not committed)
+apps/ai-engine/app/analytics/model.pkl
