@@ -1,16 +1,18 @@
 "use client";
-import { useEffect, useState } from "react";
-import { createTransaction, deleteTransaction, getTransactions } from "@/lib/api";
+import { useRef, useEffect, useState } from "react";
+import { createTransaction, deleteTransaction, getTransactions, importTransactionsCsv } from "@/lib/api";
 
 export function TransactionsTable({ token }: { token: string }) {
   const [items, setItems] = useState<any[]>([]);
   const [form, setForm] = useState({ amount: "", category: "Food", description: "" });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+  const [importingCsv, setImportingCsv] = useState(false);
+  const csvInputRef = useRef<HTMLInputElement | null>(null);
 
   function showMessage(msg: string) {
     setMessage(msg);
-    setTimeout(() => setMessage(null), 2000);
+    setTimeout(() => setMessage(null), 3000);
   }
 
   async function load() {
@@ -53,6 +55,26 @@ export function TransactionsTable({ token }: { token: string }) {
       load();
     } catch (e: any) {
       console.error(e);
+    }
+  }
+
+  async function handleCsvUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportingCsv(true);
+    try {
+      const res = await importTransactionsCsv(token, file);
+      showMessage(`Imported ${res.count} transactions`);
+      load();
+    } catch (err: any) {
+      console.error("CSV import error:", err);
+      showMessage(`Import failed: ${err.message || "error"}`);
+    } finally {
+      setImportingCsv(false);
+      if (csvInputRef.current) {
+        csvInputRef.current.value = "";
+      }
     }
   }
 
@@ -103,6 +125,18 @@ export function TransactionsTable({ token }: { token: string }) {
           >
             Record Entry
           </button>
+
+          <label className="cursor-pointer rounded-md border border-line bg-paper px-3 py-2 text-sm font-medium text-ink shadow-subtle transition-all hover:bg-paper-sheet focus-within:ring-2 focus-within:ring-teal">
+            {importingCsv ? "Importing…" : "Import CSV"}
+            <input
+              ref={csvInputRef}
+              type="file"
+              accept=".csv"
+              className="sr-only"
+              disabled={importingCsv}
+              onChange={handleCsvUpload}
+            />
+          </label>
 
           {message && (
             <span className="inline-flex items-center gap-1 rounded border border-teal/30 bg-teal-tint px-2.5 py-1 text-xs font-medium text-teal">
