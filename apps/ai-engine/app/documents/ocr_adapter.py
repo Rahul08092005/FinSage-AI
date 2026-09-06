@@ -1,3 +1,4 @@
+"""OCR Adapter for document and receipt text extraction."""
 from app.adapters.base_adapter import BaseIntegrationAdapter
 
 

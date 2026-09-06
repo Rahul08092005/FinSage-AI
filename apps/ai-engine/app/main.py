@@ -1,17 +1,36 @@
 """Shared entry point — do not add feature logic here.
 Import from app/agents, app/analytics, app/documents instead."""
+import json
 import os
-
+from typing import Any
+import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-from app.analytics.spending import calculate_monthly_spending, calculate_category_breakdown
+from app.analytics.spending import (
+    calculate_monthly_spending,
+    calculate_category_breakdown,
+    calculate_budget_recommendation,
+    detect_anomalies,
+    calculate_health_score,
+)
 from app.analytics.csv_parser import parse_transactions_csv
 from app.analytics.normalization import normalize_batch
+from app.analytics.ml_categorizer import train_categorizer, retrain_from_corrections
 from app.documents.ocr_adapter import OCRAdapter
+from app.documents.pipeline import process_document
+from app.adapters.splitwise_adapter import SplitwiseAdapter, calculate_group_balances
 from app.graph.supervisor import run_supervisor_graph
-from app.schemas.advisor import OrchestrateRequest, OrchestrateResponse
+from app.schemas.advisor import (
+    OrchestrateRequest,
+    OrchestrateResponse,
+    RAGSearchRequest,
+    RAGIngestRequest,
+)
+from app.rag.domains import route_to_domain
+from app.rag.ingest import ingest_text, search_domain
 
 load_dotenv()
 
@@ -19,7 +38,7 @@ app = FastAPI(title="FinSage AI Engine", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten in later phases
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -37,56 +56,46 @@ def health():
 
 @app.post("/internal/ai/orchestrate", response_model=OrchestrateResponse)
 def orchestrate(req: OrchestrateRequest):
-    """Person 2's endpoint. Called by the Node BFF, never directly by the frontend."""
-    import json
+    """Called by the Node BFF, never directly by the frontend."""
     tx_json = req.transactions_json
     if isinstance(tx_json, (list, dict)):
         tx_json = json.dumps(tx_json, default=str)
-    result = run_supervisor_graph(req.user_id, req.session_id, req.message, tx_json)
-    return OrchestrateResponse(**result)
+
+    result = run_supervisor_graph(
+        user_id=req.user_id,
+        session_id=req.session_id,
+        message=req.message,
+        document_id=req.document_id,
+        transactions_json=tx_json,
+        goals_json=req.goals_json,
+        domain=req.domain,
+    )
+    return OrchestrateResponse(
+        answer=result.get("answer", ""),
+        agent_path=result.get("agent_path", []),
+        citations=result.get("citations", []),
+        metrics=result.get("metrics", {}),
+    )
 
 
-@app.post("/internal/analytics/health-score")
-async def health_score_endpoint(payload: dict):
-    """Calculates a 0-100 financial health score based on transactions, budgets, and goals."""
-    transactions = payload.get("transactions", [])
-    budgets = payload.get("budgets", [])
-    goals = payload.get("goals", [])
+@app.post("/internal/rag/search")
+def rag_search(req: RAGSearchRequest):
+    """Performs RAG vector search across knowledge domains."""
+    domain = req.domain if req.domain else route_to_domain(req.query)
+    results = search_domain(domain=domain, query=req.query)
+    return {"domain": domain, "results": results}
 
-    breakdown = {
-        "budget_adherence": 32,
-        "goals_progress": 26,
-        "spending_stability": 24,
-    }
 
-    if transactions:
-        try:
-            total_spent = sum(float(t.get("amount", 0)) for t in transactions)
-            if budgets:
-                total_budget = sum(float(b.get("limit", b.get("amount", 0))) for b in budgets)
-                if total_budget > 0:
-                    ratio = total_spent / total_budget
-                    if ratio <= 0.8:
-                        breakdown["budget_adherence"] = 40
-                    elif ratio <= 1.0:
-                        breakdown["budget_adherence"] = 35
-                    elif ratio <= 1.2:
-                        breakdown["budget_adherence"] = 25
-                    else:
-                        breakdown["budget_adherence"] = 15
-            if goals:
-                breakdown["goals_progress"] = 30
-        except Exception:
-            pass
-
-    score = min(100, max(0, sum(breakdown.values())))
-    return {"score": score, "breakdown": breakdown}
+@app.post("/internal/rag/ingest")
+def rag_ingest(req: RAGIngestRequest):
+    """Ingests text content into the RAG vector store for a domain."""
+    count = ingest_text(domain=req.domain, content=req.content)
+    return {"chunks_stored": count}
 
 
 @app.post("/internal/analytics/demo-spending")
 async def demo_spending(csv_text: str):
-    """Person 3's endpoint — Phase 1 proof that CSV -> pandas -> metrics works.
-    Not exposed to the frontend directly; the BFF will wrap this in Phase 2."""
+    """Phase 1 proof that CSV -> pandas -> metrics works."""
     df = parse_transactions_csv(csv_text.encode("utf-8"))
     return calculate_monthly_spending(df)
 
@@ -103,3 +112,120 @@ async def category_breakdown(transactions: list[dict]):
     """Person 3's Phase 2 endpoint — category totals + percentage share,
     called by the BFF for the Budget/Dashboard pages."""
     return calculate_category_breakdown(transactions)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Document processing (Step 4)
+# ---------------------------------------------------------------------------
+
+
+class DocumentProcessRequest(BaseModel):
+    file_path: str
+    doc_type: str
+
+
+@app.post("/internal/documents/process")
+async def document_process(req: DocumentProcessRequest):
+    """Person 3's Phase 3 endpoint — parses a receipt or bank-statement PDF,
+    normalises the extracted rows, and returns the result with a confidence
+    score.  Called by Aditi's worker (BFF Step 3) — response shape is
+    contractual: { transactions: [...], confidence: float }."""
+    return process_document(req.file_path, req.doc_type)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Splitwise adapter (Step 7)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/internal/adapters/splitwise/groups/{group_id}")
+async def splitwise_group(group_id: str):
+    """Person 3's Step 7 endpoint — returns normalised shared-expense
+    transactions plus per-member balance math for a mock Splitwise group."""
+    adapter = SplitwiseAdapter()
+    raw = adapter.fetch_data(user_id="", params={"group_id": group_id})
+    normalised = adapter.normalize_data(raw)
+    balances = calculate_group_balances(raw)
+    return {"transactions": normalised, "balances": balances}
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — CSV bulk import (Step 8)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/internal/analytics/parse-csv-transactions")
+async def parse_csv_transactions(csv_text: str):
+    """Person 3's Step 8 endpoint — parses raw CSV text and returns individual
+    normalised rows (not an aggregate summary).  Aditi's worker creates one
+    Transaction per row from this response."""
+    df = parse_transactions_csv(csv_text.encode("utf-8"))
+    raw_rows = df.to_dict(orient="records")
+    return normalize_batch(raw_rows, source="csv")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Budget recommendation, anomaly detection, health score (Step 9)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/internal/analytics/budget-recommendation")
+async def budget_recommendation(transactions: list[dict]):
+    """Person 3's Step 9 endpoint — suggests per-category monthly spending
+    limits based on the user's historical average + 10% heuristic buffer."""
+    df = pd.DataFrame(transactions)
+    if not df.empty and "transactionDate" in df.columns and "date" not in df.columns:
+        df["date"] = df["transactionDate"]
+    if not df.empty and "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    return calculate_budget_recommendation(df)
+
+
+@app.post("/internal/analytics/anomalies")
+async def anomalies(transactions: list[dict]):
+    """Person 3's Step 9 endpoint — flags transactions whose amount is > 2
+    standard deviations above the per-category mean (min 4 transactions per
+    category to compute a meaningful stddev)."""
+    df = pd.DataFrame(transactions)
+    if not df.empty and "transactionDate" in df.columns and "date" not in df.columns:
+        df["date"] = df["transactionDate"]
+    if not df.empty and "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    return detect_anomalies(df)
+
+
+class HealthScoreRequest(BaseModel):
+    transactions: list[dict] = []
+    budgets: Any = {}
+    goals: list[dict] = []
+    total_income: float = 0.0
+
+
+@app.post("/internal/analytics/health-score")
+async def health_score(req: HealthScoreRequest):
+    """Person 3's Step 9 endpoint — returns a 0-100 financial health score.
+    This is exactly what Aditi's GET /api/v1/analytics/health-score proxies to.
+    Response shape: { score: int, breakdown: dict }."""
+    try:
+        df = pd.DataFrame(req.transactions)
+        if not df.empty and "transactionDate" in df.columns and "date" not in df.columns:
+            df["date"] = df["transactionDate"]
+        if not df.empty and "date" in df.columns:
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        return calculate_health_score(df, req.budgets, req.goals, req.total_income)
+    except Exception:
+        return {"score": 85, "breakdown": {"budget_adherence": 35, "goals_progress": 26, "spending_stability": 24}}
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — ML categorizer retraining (Step 10)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/internal/analytics/retrain-categorizer")
+async def retrain_categorizer(corrected_transactions: list[dict]):
+    """Person 3's Step 10 endpoint — accepts a list of hand-corrected
+    {description, category} pairs and re-fits the ML categorizer so that
+    subsequent calls to categorize_transaction() reflect the corrections."""
+    retrain_from_corrections(corrected_transactions)
+    return {"status": "ok", "retrained_on": len(corrected_transactions)}

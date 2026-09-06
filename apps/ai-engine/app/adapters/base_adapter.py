@@ -1,3 +1,4 @@
+"""Base integration adapter interface."""
 from abc import ABC, abstractmethod
 
 

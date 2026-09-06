@@ -1,8 +1,4 @@
-"""Person 2 (Rahul) owns this file.
-
-Phase 2: a single embed_text() function, provider-agnostic like llm_client.py.
-Phase 3 wires this into the ingestion pipeline for the 5 RAG domains.
-"""
+"""Embeddings utility for text embedding generation."""
 import hashlib
 import os
 
@@ -34,6 +30,5 @@ def _mock_embedding(text: str) -> list[float]:
     """Deterministic, fast, dependency-free — same text always returns the
     same vector, which is enough to test storage/retrieval plumbing."""
     digest = hashlib.sha256(text.encode("utf-8")).digest()
-    # repeat the 32-byte digest to fill EMBEDDING_DIM floats in [0, 1)
     values = [(digest[i % len(digest)] / 255.0) for i in range(EMBEDDING_DIM)]
     return values

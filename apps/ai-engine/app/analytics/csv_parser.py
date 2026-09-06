@@ -1,5 +1,5 @@
+"""Parse CSV transaction files into normalized pandas DataFrames."""
 import io
-
 import pandas as pd
 
 EXPECTED_COLUMNS = ["date", "description", "amount", "category"]
