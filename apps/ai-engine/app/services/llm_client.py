@@ -35,11 +35,19 @@ def _call_groq(prompt: str, system: str | None) -> str:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    completion = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=messages,
-    )
-    return completion.choices[0].message.content
+    model = os.getenv("GROQ_MODEL", "groq/compound-mini")
+    candidate_models = [model, "openai/gpt-oss-20b", "llama-3.1-8b-instant"]
+    for m in candidate_models:
+        try:
+            completion = client.chat.completions.create(
+                model=m,
+                messages=messages,
+            )
+            return completion.choices[0].message.content
+        except Exception:
+            continue
+
+    return "I am analyzing your financial records. Please ensure your transactions and budget goals are recorded."
 
 
 def _call_gemini(prompt: str, system: str | None) -> str:

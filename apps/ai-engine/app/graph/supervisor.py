@@ -23,12 +23,19 @@ class SupervisorAgent(BaseAgent):
             # Phase 2: route to the analytics tool directly.
             # Phase 4 makes this a real Analytics Agent node in the graph.
             agent_path.append("analytics_tool")
-            summary = get_spending_summary.invoke(state["transactions_json"])
-            answer = generate(
-                prompt=f"Explain this spending summary in 2-3 friendly sentences: {summary}",
-                system="You are the FinSage AI advisor. Be concise and encouraging.",
-            )
-            state["metrics"] = summary
+            try:
+                summary = get_spending_summary.invoke(state["transactions_json"])
+                answer = generate(
+                    prompt=f"Explain this spending summary in 2-3 friendly sentences: {summary}",
+                    system="You are the FinSage AI advisor. Be concise and encouraging.",
+                )
+                state["metrics"] = summary
+            except Exception:
+                answer = generate(
+                    prompt=state["message"],
+                    system="You are the FinSage AI advisor. Give a short, friendly reply about managing finances and budgets.",
+                )
+                state["metrics"] = {}
         else:
             agent_path.append("general_reply")
             answer = generate(

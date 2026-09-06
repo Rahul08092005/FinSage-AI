@@ -9,7 +9,25 @@ def calculate_monthly_spending(transactions: pd.DataFrame) -> dict:
         return {"by_month": {}, "by_category": {}, "total": 0.0}
 
     df = transactions.copy()
+    if "transactionDate" in df.columns and "date" not in df.columns:
+        df["date"] = df["transactionDate"]
+    elif "date" not in df.columns:
+        df["date"] = pd.Timestamp.now()
+
+    if not pd.api.types.is_datetime64_any_dtype(df["date"]):
+        df["date"] = pd.to_datetime(df["date"], errors="coerce").fillna(pd.Timestamp.now())
+
     df["month"] = df["date"].dt.to_period("M").astype(str)
+
+    if "category" not in df.columns:
+        df["category"] = "General"
+    else:
+        df["category"] = df["category"].fillna("General")
+
+    if "amount" not in df.columns:
+        df["amount"] = 0.0
+    else:
+        df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
 
     by_month = df.groupby("month")["amount"].sum().round(2).to_dict()
     by_category = df.groupby("category")["amount"].sum().round(2).to_dict()
