@@ -1,6 +1,6 @@
 // Person 1 (Aditi) owns this file.
-// Phase 1: only the "users" table. More tables (accounts, transactions,
-// budgets, goals, documents...) are added in later phases per the ERD.
+// Phase 2: adds Account, Transaction, Budget, Goal on top of the Phase 1 User model.
+// Phase 3+ adds Document, AdvisorSession, HealthScore, etc. per the ERD.
 
 generator client {
   provider = "prisma-client-js"
@@ -12,11 +12,93 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  password  String   // bcrypt hash, never store plain text
-  createdAt DateTime @default(now())
+  id            String        @id @default(uuid())
+  name          String
+  email         String        @unique
+  password      String
+  monthlySalary Decimal?
+  createdAt     DateTime      @default(now())
+
+  accounts     Account[]
+  transactions Transaction[]
+  budgets      Budget[]
+  goals        Goal[]
+  documents    Document[]
 
   @@map("users")
+}
+
+model Account {
+  id          String        @id @default(uuid())
+  userId      String
+  name        String
+  accountType String        // e.g. "bank", "upi", "cash", "credit_card"
+  provider    String?
+  createdAt   DateTime      @default(now())
+
+  user         User          @relation(fields: [userId], references: [id])
+  transactions Transaction[]
+
+  @@map("accounts")
+}
+
+model Transaction {
+  id              String   @id @default(uuid())
+  userId          String
+  accountId       String?
+  amount          Decimal
+  category        String
+  transactionDate DateTime
+  description     String
+  source          String   @default("manual") // manual | csv | ocr | splitwise | bank
+  createdAt       DateTime @default(now())
+
+  user    User     @relation(fields: [userId], references: [id])
+  account Account? @relation(fields: [accountId], references: [id])
+
+  @@map("transactions")
+}
+
+model Budget {
+  id          String   @id @default(uuid())
+  userId      String
+  category    String
+  monthlyLimit Decimal
+  currency    String   @default("INR")
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, category])
+  @@map("budgets")
+}
+
+model Goal {
+  id           String   @id @default(uuid())
+  userId       String
+  title        String
+  targetAmount Decimal
+  startDate    DateTime @default(now())
+  endDate      DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("goals")
+}
+
+model Document {
+  id            String   @id @default(uuid())
+  userId        String
+  title         String
+  docType       String   // "receipt" | "bank_statement" | "other"
+  fileUrl       String   // local path for now; swappable for S3 later
+  status        String   @default("QUEUED") // QUEUED|PROCESSING|COMPLETED|NEEDS_REVIEW|FAILED
+  extractedJson Json?
+  confidence    Float?
+  uploadedAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("documents")
 }
