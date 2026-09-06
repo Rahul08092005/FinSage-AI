@@ -1,12 +1,4 @@
-<<<<<<< HEAD
-"""Person 3 (Kavya) owns this file.
-
-Phase 1: OCR prototype only — proves text can be pulled out of an image.
-Phase 3 adds the Redis queue, confidence scoring, and PostgreSQL persistence
-from the Document Upload & Processing Flow diagram.
-"""
-=======
->>>>>>> d3cc9308c81467a590e531df3aadff88e23e2030
+"""OCR Adapter for document and receipt text extraction."""
 from app.adapters.base_adapter import BaseIntegrationAdapter
 
 

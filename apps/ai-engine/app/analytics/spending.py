@@ -1,13 +1,4 @@
-<<<<<<< HEAD
-"""Person 3 (Kavya) owns this file.
-
-Phase 1: the first deterministic calculation function — proves the
-"Person 3 owns the math, Person 2's agents only call it" contract.
-Phase 4 adds calculate_budget_variance, detect_anomalies,
-calculate_health_score, forecast_expenses, calculate_goal_projection.
-"""
-=======
->>>>>>> d3cc9308c81467a590e531df3aadff88e23e2030
+"""Analytics and deterministic financial math functions."""
 import pandas as pd
 
 
@@ -19,15 +10,31 @@ def calculate_monthly_spending(transactions: pd.DataFrame) -> dict:
         return {"by_month": {}, "by_category": {}, "total": 0.0}
 
     df = transactions.copy()
+    if "transactionDate" in df.columns and "date" not in df.columns:
+        df["date"] = df["transactionDate"]
+    elif "date" not in df.columns:
+        df["date"] = pd.Timestamp.now()
+
+    if not pd.api.types.is_datetime64_any_dtype(df["date"]):
+        df["date"] = pd.to_datetime(df["date"], errors="coerce").fillna(pd.Timestamp.now())
+
     df["month"] = df["date"].dt.to_period("M").astype(str)
+
+    if "category" not in df.columns:
+        df["category"] = "General"
+    else:
+        df["category"] = df["category"].fillna("General")
+
+    if "amount" not in df.columns:
+        df["amount"] = 0.0
+    else:
+        df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
 
     by_month = df.groupby("month")["amount"].sum().round(2).to_dict()
     by_category = df.groupby("category")["amount"].sum().round(2).to_dict()
     total = round(float(df["amount"].sum()), 2)
 
     return {"by_month": by_month, "by_category": by_category, "total": total}
-<<<<<<< HEAD
-=======
 
 
 def calculate_category_breakdown(transactions: list[dict]) -> dict:
@@ -40,9 +47,17 @@ def calculate_category_breakdown(transactions: list[dict]) -> dict:
         return {"by_category": {}, "total": 0.0}
 
     df = pd.DataFrame(transactions)
+    if "amount" not in df.columns:
+        return {"by_category": {}, "total": 0.0}
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
     total = round(float(df["amount"].sum()), 2)
     if total == 0:
         return {"by_category": {}, "total": 0.0}
+
+    if "category" not in df.columns:
+        df["category"] = "General"
+    else:
+        df["category"] = df["category"].fillna("General")
 
     grouped = df.groupby("category")["amount"].sum().round(2)
     by_category = {
@@ -53,7 +68,7 @@ def calculate_category_breakdown(transactions: list[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 additions (Steps 9) -- deterministic, no LLM calls
+# Phase 3 additions (Step 9) -- deterministic, no LLM calls
 # ---------------------------------------------------------------------------
 
 
@@ -119,8 +134,8 @@ def detect_anomalies(transactions: pd.DataFrame) -> list[dict]:
             continue
 
         mean = group["amount"].mean()
-        std  = group["amount"].std()
-        if std == 0:
+        std = group["amount"].std()
+        if std == 0 or pd.isna(std):
             continue
 
         flagged = group[group["amount"] > mean + 2 * std]
@@ -167,10 +182,19 @@ def calculate_health_score(
     score = 100
     breakdown: dict[str, float] = {}
 
+    # Normalize budgets if passed as a list of budget dicts
+    budgets_dict = {}
+    if isinstance(budgets, dict):
+        budgets_dict = budgets
+    elif isinstance(budgets, list):
+        for b in budgets:
+            if isinstance(b, dict) and "category" in b:
+                budgets_dict[b["category"]] = float(b.get("monthlyLimit", b.get("limit", b.get("amount", 0))))
+
     # Category budget checks
-    if not transactions.empty and "category" in transactions.columns and budgets:
+    if not transactions.empty and "category" in transactions.columns and budgets_dict:
         actual_by_cat = transactions.groupby("category")["amount"].sum().to_dict()
-        for cat, limit in budgets.items():
+        for cat, limit in budgets_dict.items():
             actual = actual_by_cat.get(cat, 0.0)
             if limit > 0 and actual > limit:
                 overage_ratio = min(1.0, (actual - limit) / limit)
@@ -186,15 +210,15 @@ def calculate_health_score(
             breakdown["Total spend exceeds income"] = -15
 
     # Goal progress bonus
-    for goal in goals:
-        progress = goal.get("progress", 0)
-        if isinstance(progress, (int, float)) and progress > 0:
-            bonus = 5
-            score = min(100, score + bonus)
-            label = goal.get("name", "goal")
-            breakdown[f"Positive progress on '{label}'"] = +bonus
+    if isinstance(goals, list):
+        for goal in goals:
+            progress = goal.get("progress", 0) if isinstance(goal, dict) else 0
+            if isinstance(progress, (int, float)) and progress > 0:
+                bonus = 5
+                score = min(100, score + bonus)
+                label = goal.get("title", goal.get("name", "goal"))
+                breakdown[f"Positive progress on '{label}'"] = +bonus
 
     score = max(0, min(100, round(score)))
 
     return {"score": score, "breakdown": breakdown}
->>>>>>> d3cc9308c81467a590e531df3aadff88e23e2030

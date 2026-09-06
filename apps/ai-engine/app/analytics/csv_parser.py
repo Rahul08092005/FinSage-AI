@@ -1,14 +1,5 @@
-<<<<<<< HEAD
-"""Person 3 (Kavya) owns this file.
-
-Phase 1: parse a bank/UPI-style CSV export into a normalized transaction
-DataFrame. This is the first stage of the "different sources -> one
-Transaction structure" pipeline described in the architecture doc.
-"""
-=======
->>>>>>> d3cc9308c81467a590e531df3aadff88e23e2030
+"""Parse CSV transaction files into normalized pandas DataFrames."""
 import io
-
 import pandas as pd
 
 EXPECTED_COLUMNS = ["date", "description", "amount", "category"]
