@@ -47,7 +47,7 @@ export function AuthGate({ children }: { children: (token: string) => React.Reac
 
   if (!token) {
     return (
-      <div className="mx-auto mt-12 max-w-md rounded-lg border border-line bg-paper-sheet p-8 shadow-ledger">
+      <div id="auth-section" className="mx-auto mt-12 max-w-md rounded-lg border border-line bg-paper-sheet p-8 shadow-ledger scroll-mt-24">
         <div className="border-b border-line pb-4">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold tracking-widest text-ink-subtle uppercase">
