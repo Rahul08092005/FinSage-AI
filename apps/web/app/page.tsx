@@ -1,3 +1,4 @@
+import { FinFlipHero } from "@/components/FinFlipHero";
 import { Navbar } from "@/components/Navbar";
 import { OverviewCards } from "@/components/OverviewCards";
 import { Sidebar } from "@/components/Sidebar";
@@ -19,7 +20,8 @@ export default async function DashboardPage() {
   return (
     <div className="flex min-h-screen flex-col bg-paper">
       <Navbar />
-      <div className="flex flex-1">
+      <FinFlipHero />
+      <div id="dashboard-overview" className="flex flex-1">
         <Sidebar />
         <main className="flex-1 p-6 md:p-8">
           <div className="border-b border-line pb-4">
