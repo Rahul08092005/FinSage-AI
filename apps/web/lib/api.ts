@@ -18,7 +18,30 @@ export async function registerUser(data: { name: string; email: string; password
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  return res.json();
+  const json = await res.json();
+  if (!res.ok) {
+    const errorMsg =
+      json.error?.formErrors?.join(", ") ||
+      (typeof json.error === "string" ? json.error : "Registration failed");
+    throw new Error(errorMsg);
+  }
+  return json;
+}
+
+export async function loginUser(data: { email: string; password: string }) {
+  const res = await fetch(`${BFF_URL}/api/v1/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    const errorMsg =
+      json.error?.formErrors?.join(", ") ||
+      (typeof json.error === "string" ? json.error : "Login failed");
+    throw new Error(errorMsg);
+  }
+  return json;
 }
 
 export async function getTransactions(token: string) {

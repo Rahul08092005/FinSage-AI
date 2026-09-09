@@ -1,13 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useToken } from "./AuthGate";
 
 export function FinFlipHero() {
   const token = useToken();
+  const [mounted, setMounted] = useState(false);
   const [showHowModal, setShowHowModal] = useState(false);
   const [activeTab, setActiveTab] = useState<"track" | "understand" | "split" | "grow">("track");
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Once logged in, hide this hero banner completely
+  if (token) {
+    return null;
+  }
+
+  // Prevent flash if token exists in localStorage
+  if (typeof window !== "undefined" && localStorage.getItem("finsage_token")) {
+    return null;
+  }
+
+  // Before client mount, avoid mismatch
+  if (!mounted) {
+    return null;
+  }
 
   function handleStartFlipping() {
     if (token) {
@@ -120,8 +140,14 @@ export function FinFlipHero() {
                 {/* Sub-label showing quick login shortcut if unauthenticated */}
                 {!token && (
                   <p className="mt-3 text-[11px] font-medium text-ink-muted">
-                    Pre-seeded with demo data • Instant login with{" "}
-                    <code className="rounded bg-white/60 px-1 py-0.5 font-mono text-ink">demo@finsage.ai</code>
+                    Pre-seeded demo data ready •{" "}
+                    <Link href="/signin" className="font-bold text-ink underline transition hover:text-[#84cc16]">
+                      Sign In
+                    </Link>{" "}
+                    or{" "}
+                    <Link href="/signup" className="font-bold text-ink underline transition hover:text-[#84cc16]">
+                      Create Account
+                    </Link>
                   </p>
                 )}
               </div>

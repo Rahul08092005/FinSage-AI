@@ -9,7 +9,7 @@ interface NavLink {
 }
 
 const links: NavLink[] = [
-  { label: "Dashboard", href: "/" },
+  { label: "Dashboard", href: "/dashboard" },
   { label: "Transactions", href: "/transactions" },
   { label: "Budgets", href: "/budgets" },
   { label: "Goals", href: "/goals" },
@@ -45,7 +45,7 @@ export function Sidebar() {
             );
           }
 
-          const isActive = pathname === link.href;
+          const isActive = pathname === link.href || (link.href === "/dashboard" && pathname === "/");
 
           return (
             <Link

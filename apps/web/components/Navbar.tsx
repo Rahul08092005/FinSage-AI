@@ -16,7 +16,7 @@ export function Navbar() {
   return (
     <header className="sticky top-0 z-40 flex items-center justify-between border-b border-ink/40 bg-ink/95 px-6 py-3.5 shadow-subtle backdrop-blur-md">
       <div className="flex items-center gap-4">
-        <a href="/" className="flex items-center transition-opacity hover:opacity-90">
+        <a href={token ? "/dashboard" : "/login"} className="flex items-center transition-opacity hover:opacity-90">
           <span className="font-serif text-xl font-black tracking-tight text-paper-sheet">
             Fin <span className="text-[#a3e635]">Flip</span>
           </span>
@@ -26,11 +26,12 @@ export function Navbar() {
         </a>
         <span className="hidden text-xs text-ink-subtle md:inline-block">/</span>
         <span className="hidden font-serif text-xs italic text-ink-subtle lg:inline-block">
-          Flip the way you handle money
+          Personal Wealth Workspace
         </span>
 
         {/* Quick Nav Links */}
         <nav className="hidden items-center gap-4 pl-2 md:flex text-xs font-medium text-paper-sheet/80">
+          <a href="/dashboard" className="transition-colors hover:text-[#a3e635]">Dashboard</a>
           <a href="/transactions" className="transition-colors hover:text-[#a3e635]">Transactions</a>
           <a href="/budgets" className="transition-colors hover:text-[#a3e635]">Budgets</a>
           <a href="/goals" className="transition-colors hover:text-[#a3e635]">Goals</a>
@@ -52,12 +53,20 @@ export function Navbar() {
             Logout
           </button>
         ) : (
-          <a
-            href="#auth-section"
-            className="rounded-full bg-[#84cc16] px-3.5 py-1 text-xs font-bold text-ink shadow-sm transition-all hover:bg-[#a3e635] hover:scale-105 active:scale-95"
-          >
-            Sign In
-          </a>
+          <div className="flex items-center gap-2">
+            <a
+              href="/signin"
+              className="rounded-full border border-paper-sheet/30 bg-transparent px-3.5 py-1 text-xs font-bold text-paper-sheet transition-all hover:bg-paper-sheet/10"
+            >
+              Sign In
+            </a>
+            <a
+              href="/signup"
+              className="rounded-full bg-[#84cc16] px-3.5 py-1 text-xs font-bold text-ink shadow-sm transition-all hover:bg-[#a3e635] hover:scale-105 active:scale-95"
+            >
+              Sign Up
+            </a>
+          </div>
         )}
       </div>
     </header>
