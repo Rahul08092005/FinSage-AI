@@ -5,7 +5,7 @@ import { FinFlipLanding } from "@/components/FinFlipLanding";
 
 export default function HomePage() {
   return (
-    <main className="min-h-screen bg-[#060B12]">
+    <main className="min-h-screen bg-[#FAF8F5]">
       <Navbar />
       <FinFlipLanding />
     </main>
