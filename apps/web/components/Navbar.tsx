@@ -1,71 +1,104 @@
 "use client";
+
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 export function Navbar() {
   const [token, setToken] = useState<string | null>(null);
+  const pathname = usePathname();
 
   useEffect(() => {
-    setToken(localStorage.getItem("finsage_token"));
+    if (typeof window !== "undefined") {
+      setToken(localStorage.getItem("finsage_token"));
+    }
   }, []);
 
   function handleLogout() {
     localStorage.removeItem("finsage_token");
-    window.location.reload();
+    window.location.href = "/";
   }
 
+  const isAppRoute =
+    pathname?.startsWith("/dashboard") ||
+    pathname?.startsWith("/transactions") ||
+    pathname?.startsWith("/budgets") ||
+    pathname?.startsWith("/goals") ||
+    pathname?.startsWith("/documents") ||
+    pathname?.startsWith("/advisor");
+
   return (
-    <header className="sticky top-0 z-40 flex items-center justify-between border-b border-ink/40 bg-ink/95 px-6 py-3.5 shadow-subtle backdrop-blur-md">
-      <div className="flex items-center gap-4">
-        <a href={token ? "/dashboard" : "/login"} className="flex items-center transition-opacity hover:opacity-90">
-          <span className="font-serif text-xl font-black tracking-tight text-paper-sheet">
-            Fin <span className="text-[#a3e635]">Flip</span>
+    <header className="sticky top-0 z-50 flex items-center justify-between border-b border-white/10 bg-[#060B12]/90 px-6 py-3.5 backdrop-blur-md">
+      {/* Brand & Section Navigation */}
+      <div className="flex items-center gap-8">
+        <Link
+          href={token ? "/dashboard" : "/"}
+          className="flex items-center gap-2 group transition-opacity"
+        >
+          <span className="font-serif text-xl font-black tracking-tight text-white">
+            Fin <span className="text-[#84cc16] transition-colors group-hover:text-[#a3e635]">Flip</span>
           </span>
-          <span className="ml-1.5 rounded border border-[#84cc16]/50 bg-[#84cc16]/20 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-[#a3e635] uppercase">
+          <span className="rounded-full border border-[#84cc16]/40 bg-[#84cc16]/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-[#84cc16]">
             AI
           </span>
-        </a>
-        <span className="hidden text-xs text-ink-subtle md:inline-block">/</span>
-        <span className="hidden font-serif text-xs italic text-ink-subtle lg:inline-block">
-          Personal Wealth Workspace
-        </span>
+        </Link>
 
-        {/* Quick Nav Links */}
-        <nav className="hidden items-center gap-4 pl-2 md:flex text-xs font-medium text-paper-sheet/80">
-          <a href="/dashboard" className="transition-colors hover:text-[#a3e635]">Dashboard</a>
-          <a href="/transactions" className="transition-colors hover:text-[#a3e635]">Transactions</a>
-          <a href="/budgets" className="transition-colors hover:text-[#a3e635]">Budgets</a>
-          <a href="/goals" className="transition-colors hover:text-[#a3e635]">Goals</a>
-          <a href="/documents" className="transition-colors hover:text-[#a3e635]">Documents</a>
-          <a href="/advisor" className="transition-colors hover:text-[#a3e635] text-indigo-300 font-semibold">AI Advisor</a>
+        {/* Navigation Links */}
+        <nav className="hidden items-center gap-6 text-xs font-medium text-white/70 md:flex">
+          {token && isAppRoute ? (
+            <>
+              <Link href="/dashboard" className="transition hover:text-white">Dashboard</Link>
+              <Link href="/transactions" className="transition hover:text-white">Transactions</Link>
+              <Link href="/budgets" className="transition hover:text-white">Budgets</Link>
+              <Link href="/goals" className="transition hover:text-white">Goals</Link>
+              <Link href="/documents" className="transition hover:text-white">Documents</Link>
+              <Link href="/advisor" className="text-[#84cc16] font-semibold transition hover:text-white">AI Advisor</Link>
+            </>
+          ) : (
+            <>
+              <a href="#features" className="transition hover:text-white">Features</a>
+              <a href="#ocr" className="transition hover:text-white">OCR Capture</a>
+              <a href="#splitwise" className="transition hover:text-white">Splitwise</a>
+              <a href="#knowledge" className="transition hover:text-white">Knowledge Engine</a>
+              <a href="#how-it-works" className="transition hover:text-white">How It Works</a>
+            </>
+          )}
         </nav>
       </div>
 
+      {/* Right Controls */}
       <div className="flex items-center gap-3">
-        <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-teal/40 bg-teal/15 px-2.5 py-0.5 text-[11px] font-medium tracking-wide text-teal-light">
-          <span className="h-1.5 w-1.5 rounded-full bg-teal-light"></span>
-          Live Core
-        </span>
         {token ? (
-          <button
-            onClick={handleLogout}
-            className="rounded-md border border-line-dark/30 bg-ink-light/80 px-3 py-1.5 text-xs font-medium text-paper-sheet transition-colors hover:border-line hover:bg-ink-light focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
-          >
-            Logout
-          </button>
+          <div className="flex items-center gap-3">
+            {!isAppRoute && (
+              <Link
+                href="/dashboard"
+                className="rounded-full bg-[#84cc16] px-4 py-1.5 text-xs font-bold text-[#060B12] shadow-sm transition hover:bg-[#a3e635] hover:scale-105 active:scale-95"
+              >
+                Dashboard &rarr;
+              </Link>
+            )}
+            <button
+              onClick={handleLogout}
+              className="rounded-full border border-white/15 bg-white/5 px-3.5 py-1.5 text-xs font-medium text-white/80 transition hover:border-white/30 hover:bg-white/10 hover:text-white"
+            >
+              Logout
+            </button>
+          </div>
         ) : (
-          <div className="flex items-center gap-2">
-            <a
+          <div className="flex items-center gap-3">
+            <Link
               href="/signin"
-              className="rounded-full border border-paper-sheet/30 bg-transparent px-3.5 py-1 text-xs font-bold text-paper-sheet transition-all hover:bg-paper-sheet/10"
+              className="px-3 py-1.5 text-xs font-semibold text-white/80 transition hover:text-white"
             >
               Sign In
-            </a>
-            <a
+            </Link>
+            <Link
               href="/signup"
-              className="rounded-full bg-[#84cc16] px-3.5 py-1 text-xs font-bold text-ink shadow-sm transition-all hover:bg-[#a3e635] hover:scale-105 active:scale-95"
+              className="rounded-full bg-[#84cc16] px-4 py-1.5 text-xs font-bold text-[#060B12] shadow-sm transition hover:bg-[#a3e635] hover:scale-105 active:scale-95"
             >
-              Sign Up
-            </a>
+              Start Flipping
+            </Link>
           </div>
         )}
       </div>
