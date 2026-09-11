@@ -56,6 +56,8 @@ model Transaction {
   user    User     @relation(fields: [userId], references: [id])
   account Account? @relation(fields: [accountId], references: [id])
 
+  // Phase 4: composite index on the two columns used by every list/filter query
+  @@index([userId, transactionDate])
   @@map("transactions")
 }
 

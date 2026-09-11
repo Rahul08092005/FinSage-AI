@@ -7,10 +7,18 @@ import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth.middleware";
 
 const createSchema = z.object({
-  amount: z.number(),
-  category: z.string().min(1),
-  transactionDate: z.string(), // ISO date string
-  description: z.string().min(1),
+  // Phase 4: positive() rejects 0 and negative amounts; descriptions and
+  // categories get a max length to prevent payload abuse; transactionDate
+  // is validated as a real parseable date, not just any string.
+  amount: z.number().positive({ message: "Amount must be greater than 0" }),
+  category: z.string().min(1).max(100, { message: "Category must be 100 characters or fewer" }),
+  transactionDate: z.string().refine((s) => !isNaN(Date.parse(s)), {
+    message: "transactionDate must be a valid date string (e.g. ISO 8601)",
+  }),
+  description: z
+    .string()
+    .min(1)
+    .max(500, { message: "Description must be 500 characters or fewer" }),
   accountId: z.string().optional(),
   source: z.string().optional(),
 });
@@ -26,7 +34,7 @@ export async function listTransactions(req: AuthedRequest, res: Response) {
     if (to) where.transactionDate.lte = new Date(to);
   }
 
-  const take = Math.min(Number(limit) || 20, 100);
+  const take = Math.min(Number(limit) || 20, 100); // hard max 100 — verified Phase 4
   const skip = (Math.max(Number(page) || 1, 1) - 1) * take;
 
   const [items, total] = await Promise.all([
@@ -57,6 +65,12 @@ export async function createTransaction(req: AuthedRequest, res: Response) {
       source: parsed.data.source ?? "manual",
     },
   });
+
+  // Audit log: transaction created
+  console.log(
+    `[AUDIT] userId=${req.userId} action=transaction.create transactionId=${tx.id} timestamp=${new Date().toISOString()}`
+  );
+
   res.status(201).json(tx);
 }
 
@@ -84,5 +98,11 @@ export async function deleteTransaction(req: AuthedRequest, res: Response) {
   if (!existing) return res.status(404).json({ error: "Transaction not found" });
 
   await prisma.transaction.delete({ where: { id } });
+
+  // Audit log: transaction deleted
+  console.log(
+    `[AUDIT] userId=${req.userId} action=transaction.delete transactionId=${id} timestamp=${new Date().toISOString()}`
+  );
+
   res.status(204).send();
 }

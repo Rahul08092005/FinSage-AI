@@ -5,7 +5,9 @@ import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth.middleware";
 
 const budgetSchema = z.object({
-  category: z.string().min(1),
+  // Phase 4: category gets a max length to prevent payload abuse.
+  // monthlyLimit was already .positive() — no change needed.
+  category: z.string().min(1).max(100, { message: "Category must be 100 characters or fewer" }),
   monthlyLimit: z.number().positive(),
   currency: z.string().optional(),
 });

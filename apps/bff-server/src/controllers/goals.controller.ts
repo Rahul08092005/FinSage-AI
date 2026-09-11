@@ -5,9 +5,13 @@ import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth.middleware";
 
 const goalSchema = z.object({
-  title: z.string().min(1),
+  // Phase 4: title gets a max length to prevent abuse; endDate is validated as
+  // a real parseable date rather than accepting any arbitrary string.
+  title: z.string().min(1).max(200, { message: "Title must be 200 characters or fewer" }),
   targetAmount: z.number().positive(),
-  endDate: z.string(), // ISO date
+  endDate: z.string().refine((s) => !isNaN(Date.parse(s)), {
+    message: "endDate must be a valid date string (e.g. ISO 8601)",
+  }),
 });
 
 export async function listGoals(req: AuthedRequest, res: Response) {
