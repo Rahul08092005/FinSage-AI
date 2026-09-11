@@ -42,6 +42,11 @@ export async function uploadDocument(req: AuthedRequest, res: Response) {
   const job = JSON.stringify({ documentId: doc.id, filePath: fileUrl, docType });
   await redis.lpush("document-processing-queue", job);
 
+  // Audit log: document uploaded
+  console.log(
+    `[AUDIT] userId=${req.userId} action=document.upload documentId=${doc.id} docType=${docType} timestamp=${new Date().toISOString()}`
+  );
+
   return res.status(201).json({ documentId: doc.id, status: doc.status });
 }
 
@@ -82,10 +87,17 @@ export async function getDocument(req: AuthedRequest, res: Response) {
 // Transaction rows, and marks the Document COMPLETED.
 // ---------------------------------------------------------------------------
 const confirmRowSchema = z.object({
-  amount: z.number(),
-  category: z.string().min(1),
-  transactionDate: z.string(), // ISO date string
-  description: z.string().min(1),
+  // Phase 4: same validation rules as the main transaction createSchema —
+  // amount must be positive, dates must parse, strings have reasonable caps.
+  amount: z.number().positive({ message: "Amount must be greater than 0" }),
+  category: z.string().min(1).max(100, { message: "Category must be 100 characters or fewer" }),
+  transactionDate: z.string().refine((s) => !isNaN(Date.parse(s)), {
+    message: "transactionDate must be a valid date string (e.g. ISO 8601)",
+  }),
+  description: z
+    .string()
+    .min(1)
+    .max(500, { message: "Description must be 500 characters or fewer" }),
   accountId: z.string().optional(),
 });
 
