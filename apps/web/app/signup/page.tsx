@@ -3,8 +3,8 @@ import { AuthCard } from "@/components/AuthCard";
 import { Navbar } from "@/components/Navbar";
 
 export const metadata = {
-  title: "Create Account — Fin Flip AI",
-  description: "Create your Fin Flip account and start tracking, understanding, splitting, and growing money with AI.",
+  title: "Create Account — FinSage AI",
+  description: "Create your FinSage account and start tracking, understanding, splitting, and growing money with AI.",
 };
 
 export default function SignUpPage() {
@@ -21,7 +21,7 @@ export default function SignUpPage() {
               Join the Next-Gen Fintech
             </span>
             <h1 className="mt-3 font-serif text-3xl font-black tracking-tight text-ink sm:text-4xl">
-              Start Flipping with <span className="text-[#84cc16]">Fin Flip</span>
+              Start Flipping with <span className="text-[#84cc16]">FinSage AI</span>
             </h1>
             <p className="mt-1 text-xs text-ink-muted sm:text-sm">
               Track • Understand • Split • Grow with AI. Free forever for individuals.

@@ -178,13 +178,13 @@ export function FinFlipHero() {
             {/* Header */}
             <div className="border-b border-line pb-4">
               <span className="rounded border border-[#84cc16]/40 bg-[#84cc16]/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-ink">
-                How Fin Flip Works
+                How FinSage AI Works
               </span>
               <h2 className="mt-2 font-serif text-2xl font-bold tracking-tight text-ink sm:text-3xl">
                 Flip the way you handle money
               </h2>
               <p className="mt-1 text-xs text-ink-muted sm:text-sm">
-                Fin Flip combines automated double-entry ledgering, OCR document processing, and AI advisory to streamline your wealth.
+                FinSage AI combines automated double-entry ledgering, OCR document processing, and AI advisory to streamline your wealth.
               </p>
             </div>
 
@@ -251,7 +251,7 @@ export function FinFlipHero() {
                 <div>
                   <h3 className="font-serif text-lg font-bold text-ink">3. Split & Budget Effectively</h3>
                   <p className="mt-1 text-xs leading-relaxed text-ink-muted">
-                    Set monthly limits per category (Groceries, Housing, Dining, Entertainment). Fin Flip automatically
+                    Set monthly limits per category (Groceries, Housing, Dining, Entertainment). FinSage AI automatically
                     warns when you approach 80% and lets you split complex shared transactions seamlessly.
                   </p>
                   <div className="mt-3 flex items-center gap-2 text-xs font-medium text-teal">

@@ -3,7 +3,7 @@ import { AuthCard } from "@/components/AuthCard";
 import { Navbar } from "@/components/Navbar";
 
 export const metadata = {
-  title: "Sign In — Fin Flip AI",
+  title: "Sign In — FinSage AI",
   description: "Sign in to access your personal wealth ledger, budgets, and AI financial advisor.",
 };
 
@@ -21,7 +21,7 @@ export default function SignInPage() {
               Secure Personal Ledger
             </span>
             <h1 className="mt-3 font-serif text-3xl font-black tracking-tight text-ink sm:text-4xl">
-              Welcome Back to <span className="text-[#84cc16]">Fin Flip</span>
+              Welcome Back to <span className="text-[#84cc16]">FinSage AI</span>
             </h1>
             <p className="mt-1 text-xs text-ink-muted sm:text-sm">
               Flip the way you handle money with AI-driven intelligence.
