@@ -14,6 +14,7 @@ import re
 from typing import Optional
 
 from app.analytics.categorization import categorize_transaction
+from app.analytics.pii_masking import mask_pii
 
 # ---------------------------------------------------------------------------
 # Regex for bank-statement lines
@@ -49,9 +50,9 @@ def _parse_line(line: str) -> Optional[dict]:
     return {
         "amount": amount,
         "date": date_str,
-        "description": description,
+        "description": mask_pii(description),
         "category": categorize_transaction(description),
-        "raw_text": line.strip(),
+        "raw_text": mask_pii(line.strip()),
     }
 
 
@@ -63,8 +64,7 @@ def parse_bank_statement_pdf(pdf_path: str) -> list[dict]:
 
     Returns:
         A list of dicts (amount, date, description, category, raw_text).
-        Returns an empty list -- never raises -- when the file is missing,
-        pypdf is not installed, or no lines match the expected format.
+        Raises ValueError if the file is corrupted, encrypted, or invalid PDF.
     """
     try:
         import pypdf  # lazy import so the module loads even without pypdf
@@ -87,8 +87,8 @@ def parse_bank_statement_pdf(pdf_path: str) -> list[dict]:
                 parsed = _parse_line(line)
                 if parsed:
                     rows.append(parsed)
-    except Exception:
-        # File not found, encrypted PDF, corrupt file, etc. -- return empty list
-        return []
+    except Exception as exc:
+        raise ValueError(f"Could not read PDF file — file may be corrupted, encrypted, or invalid ({exc})") from exc
 
     return rows
+

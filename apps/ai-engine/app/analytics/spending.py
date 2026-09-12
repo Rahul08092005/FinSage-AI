@@ -222,3 +222,159 @@ def calculate_health_score(
     score = max(0, min(100, round(score)))
 
     return {"score": score, "breakdown": breakdown}
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 additions (Kavya) -- deterministic, no LLM calls
+# ---------------------------------------------------------------------------
+
+
+def forecast_expenses(transactions: pd.DataFrame, months_ahead: int = 1) -> dict:
+    """Forecast future monthly spending per category using historical averages.
+
+    Note: This is a naive moving-average forecast, not a trained time-series model.
+    It computes the average monthly spend per category over the available history
+    and projects that forward by `months_ahead` months.
+
+    Args:
+        transactions: DataFrame containing transactions with 'date' (or 'transactionDate'),
+                      'amount', and 'category'.
+        months_ahead: Number of months to project forward (default 1).
+
+    Returns:
+        { category: projected_amount }
+    """
+    if transactions is None or transactions.empty:
+        return {}
+
+    df = transactions.copy()
+    if "transactionDate" in df.columns and "date" not in df.columns:
+        df["date"] = df["transactionDate"]
+    elif "date" not in df.columns:
+        return {}
+
+    if not pd.api.types.is_datetime64_any_dtype(df["date"]):
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+
+    df = df.dropna(subset=["date"])
+    if df.empty:
+        return {}
+
+    if "category" not in df.columns:
+        df["category"] = "General"
+    else:
+        df["category"] = df["category"].fillna("General").astype(str)
+
+    if "amount" not in df.columns:
+        return {}
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
+
+    # Filter for positive expenses
+    df = df[df["amount"] > 0]
+    if df.empty:
+        return {}
+
+    df["month"] = df["date"].dt.to_period("M").astype(str)
+
+    # Average monthly spend per category across active months
+    monthly_by_cat = (
+        df.groupby(["category", "month"])["amount"]
+        .sum()
+        .groupby(level="category")
+        .mean()
+    )
+
+    multiplier = max(0, int(months_ahead)) if months_ahead is not None else 1
+    return {
+        cat: round(float(avg) * multiplier, 2)
+        for cat, avg in monthly_by_cat.items()
+    }
+
+
+def calculate_goal_projection(
+    goal: dict,
+    transactions: pd.DataFrame,
+    monthly_salary: float | None = None,
+) -> dict:
+    """Project realistic completion date and timeline for a financial savings goal.
+
+    Replaces simplified Phase 3 placeholder math with real historical net savings.
+    Computes average monthly net savings as:
+      - (monthly_salary - average_monthly_spend) if monthly_salary is provided (> 0).
+      - Heuristic: max(5000.0, avg_monthly_spend * 0.2) if monthly_salary is absent or <= 0
+        (documented 20% savings heuristic).
+
+    Args:
+        goal: Dict containing goal parameters, e.g.:
+              'target_amount' (float/int), 'current_saved' (float/int),
+              and optionally 'target_date' or 'deadline' (str 'YYYY-MM-DD').
+        transactions: DataFrame of user transactions.
+        monthly_salary: Optional user monthly income/salary.
+
+    Returns:
+        {
+            "on_track": bool,
+            "projected_date": str,        # YYYY-MM-DD
+            "months_remaining": int,
+        }
+    """
+    import math
+    from datetime import datetime, timedelta
+
+    target_amount = float(goal.get("target_amount", goal.get("targetAmount", 0.0)) or 0.0)
+    current_saved = float(goal.get("current_saved", goal.get("currentSaved", 0.0)) or 0.0)
+    remaining = max(0.0, target_amount - current_saved)
+
+    if remaining <= 0:
+        return {
+            "on_track": True,
+            "projected_date": datetime.now().strftime("%Y-%m-%d"),
+            "months_remaining": 0,
+        }
+
+    # Compute average monthly spend from transaction history
+    avg_monthly_spend = 0.0
+    if transactions is not None and not transactions.empty:
+        df = transactions.copy()
+        if "transactionDate" in df.columns and "date" not in df.columns:
+            df["date"] = df["transactionDate"]
+        elif "date" not in df.columns:
+            df["date"] = pd.Timestamp.now()
+
+        df["date"] = pd.to_datetime(df["date"], errors="coerce").fillna(pd.Timestamp.now())
+        df["amount"] = pd.to_numeric(df.get("amount", 0.0), errors="coerce").fillna(0.0)
+        df["month"] = df["date"].dt.to_period("M").astype(str)
+        monthly_totals = df[df["amount"] > 0].groupby("month")["amount"].sum()
+        if not monthly_totals.empty:
+            avg_monthly_spend = float(monthly_totals.mean())
+
+    # Compute net monthly savings
+    if monthly_salary is not None and float(monthly_salary) > 0:
+        salary = float(monthly_salary)
+        net_savings = max(1000.0, salary - avg_monthly_spend)
+    else:
+        # Documented heuristic: 20% savings buffer or baseline 5,000 INR
+        net_savings = max(5000.0, avg_monthly_spend * 0.2)
+
+    months_remaining = int(math.ceil(remaining / net_savings)) if net_savings > 0 else 12
+    projected_dt = datetime.now() + timedelta(days=months_remaining * 30)
+    projected_date = projected_dt.strftime("%Y-%m-%d")
+
+    # Evaluate on-track status against goal deadline if available
+    deadline_str = goal.get("target_date") or goal.get("deadline") or goal.get("targetDate")
+    on_track = True
+    if deadline_str:
+        try:
+            deadline_dt = pd.to_datetime(deadline_str).to_pydatetime()
+            if deadline_dt.tzinfo is not None:
+                deadline_dt = deadline_dt.replace(tzinfo=None)
+            on_track = projected_dt <= deadline_dt
+        except Exception:
+            on_track = True
+
+    return {
+        "on_track": bool(on_track),
+        "projected_date": projected_date,
+        "months_remaining": months_remaining,
+    }
+

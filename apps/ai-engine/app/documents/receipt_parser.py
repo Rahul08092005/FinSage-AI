@@ -10,6 +10,7 @@ from typing import Optional
 
 from app.adapters.base_adapter import BaseIntegrationAdapter  # noqa: F401 (style ref)
 from app.analytics.categorization import categorize_transaction
+from app.analytics.pii_masking import mask_pii
 from app.documents.ocr_adapter import OCRAdapter
 
 # ---------------------------------------------------------------------------
@@ -58,7 +59,7 @@ def _extract_description(text: str) -> str:
     """Return the first non-empty, non-whitespace line as a merchant guess."""
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped:
+        if stripped and not stripped.startswith("[OCR"):
             return stripped
     return ""
 
@@ -78,22 +79,47 @@ def parse_receipt(image_path: str) -> dict:
     Returns:
         Dict with keys: amount (float|None), date (str|None),
         description (str), category (str), raw_text (str).
-        Never raises -- bad values surface as None/empty.
+        Raises ValueError on corrupted or unreadable images.
     """
+    if image_path:
+        # Validate that the file is an readable image before passing to OCR
+        try:
+            from PIL import Image
+            with Image.open(image_path) as img:
+                img.verify()
+        except Exception as exc:
+            raise ValueError(
+                "Could not extract text from image — file may be corrupted or unsupported format"
+            ) from exc
+
     try:
         raw_text: str = OCRAdapter().extract_text(image_path)
-    except Exception as exc:  # pragma: no cover -- OCRAdapter already catches most
-        raw_text = f"[receipt_parser OCR error: {exc}]"
+    except Exception as exc:
+        raise ValueError(
+            f"Could not extract text from image — file may be corrupted or unsupported format ({exc})"
+        ) from exc
+
+    if not raw_text or not raw_text.strip():
+        raise ValueError(
+            "Could not extract text from image — file may be corrupted or unsupported format"
+        )
 
     amount = _extract_amount(raw_text)
     date = _extract_date(raw_text)
     description = _extract_description(raw_text)
-    category = categorize_transaction(description)
+    category = categorize_transaction(description) if description else "Other"
+
+    # If neither amount nor valid description could be parsed from a non-mock run
+    if image_path and amount is None and not description and raw_text.startswith("[OCR fallback"):
+        raise ValueError(
+            "Could not extract text from image — file may be corrupted or unsupported format"
+        )
 
     return {
         "amount": amount,
         "date": date,
-        "description": description,
+        "description": mask_pii(description),
         "category": category,
-        "raw_text": raw_text,
+        "raw_text": mask_pii(raw_text),
     }
+
