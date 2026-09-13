@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { Navbar } from "./Navbar";
-import { Sidebar } from "./Sidebar";
 import { useToken } from "./AuthGate";
 
 interface AppShellProps {
@@ -11,9 +10,10 @@ interface AppShellProps {
   title?: string;
   subtitle?: string;
   actions?: React.ReactNode;
+  hideHeader?: boolean;
 }
 
-export function AppShell({ children, title, subtitle, actions }: AppShellProps) {
+export function AppShell({ children, title, subtitle, actions, hideHeader = false }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname();
   const token = useToken();
@@ -51,28 +51,24 @@ export function AppShell({ children, title, subtitle, actions }: AppShellProps) 
       {/* Top Application Header */}
       <Navbar />
 
-      {/* Main Workspace: Sidebar + Dashboard Content */}
-      <div className="flex flex-1">
-        <Sidebar />
-
-        <main className="flex-1 p-6 md:p-8">
-          {title && (
-            <div className="flex flex-col gap-1 border-b border-line pb-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h1 className="font-serif text-2xl font-semibold tracking-tight text-ink md:text-3xl">
-                  {title}
-                </h1>
-                {subtitle && <p className="mt-1 text-xs text-ink-muted">{subtitle}</p>}
-              </div>
-              {actions && <div className="mt-2 sm:mt-0 flex items-center gap-2">{actions}</div>}
+      {/* Main Workspace Content (Full Width, No Sidebar) */}
+      <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-3 sm:py-3.5 sm:px-6 lg:px-8">
+        {!hideHeader && title && (
+          <div className="flex flex-col gap-1 border-b border-line pb-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="font-serif text-2xl font-semibold tracking-tight text-ink md:text-3xl">
+                {title}
+              </h1>
+              {subtitle && <p className="mt-1 text-xs text-ink-muted">{subtitle}</p>}
             </div>
-          )}
-
-          <div className="mt-6">
-            {typeof children === "function" ? children(token) : children}
+            {actions && <div className="mt-2 flex items-center gap-2 sm:mt-0">{actions}</div>}
           </div>
-        </main>
-      </div>
+        )}
+
+        <div className={!hideHeader && title ? "mt-6" : ""}>
+          {typeof children === "function" ? children(token) : children}
+        </div>
+      </main>
     </div>
   );
 }
