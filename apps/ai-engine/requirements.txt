@@ -14,3 +14,6 @@ pypdf==4.3.1
 scikit-learn==1.5.2
 psycopg2-binary==2.9.9
 google-generativeai==0.8.2
+winocr>=0.0.15
+pypdfium2>=4.30.0
+opencv-python<4.10

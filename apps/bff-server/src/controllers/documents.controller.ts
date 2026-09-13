@@ -34,7 +34,8 @@ export async function uploadDocument(req: AuthedRequest, res: Response) {
       title: req.file.originalname,
       docType,
       fileUrl,
-      status: "QUEUED",
+      status: "PROCESSING",
+      processingStartedAt: new Date(),
     },
   });
 
@@ -64,6 +65,11 @@ export async function listDocuments(req: AuthedRequest, res: Response) {
       status: true,
       confidence: true,
       uploadedAt: true,
+      extractedJson: true,
+      transactionId: true,
+      ocrError: true,
+      processingStartedAt: true,
+      processingCompletedAt: true,
     },
   });
   res.json(documents);
@@ -78,7 +84,39 @@ export async function getDocument(req: AuthedRequest, res: Response) {
     where: { id, userId: req.userId },
   });
   if (!doc) return res.status(404).json({ error: "Document not found" });
-  res.json(doc);
+
+  let merchant = null;
+  let date = null;
+  let amount = null;
+  let currency = "INR";
+  let category = "Other";
+  let description = doc.title;
+
+  if (doc.extractedJson && Array.isArray(doc.extractedJson) && doc.extractedJson.length > 0) {
+    const first: any = doc.extractedJson[0];
+    merchant = first.merchant || null;
+    date = first.date || first.transactionDate || null;
+    amount = first.amount != null && !isNaN(Number(first.amount)) ? Number(first.amount) : null;
+    currency = first.currency || "INR";
+    category = first.category || "Other";
+    description = first.description || first.merchant || doc.title;
+  }
+
+  res.json({
+    ...doc,
+    filename: doc.title,
+    type: doc.docType,
+    uploaded_at: doc.uploadedAt,
+    ocr_confidence: doc.confidence,
+    transaction_id: doc.transactionId,
+    processing_error: doc.ocrError,
+    merchant,
+    date,
+    amount,
+    currency,
+    category,
+    description,
+  });
 }
 
 // ---------------------------------------------------------------------------

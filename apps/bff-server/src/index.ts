@@ -16,6 +16,7 @@ import knowledgeRoutes from "./routes/knowledge.routes";
 import analyticsRoutes from "./routes/analytics.routes";
 // Phase 4 routes
 import reportsRoutes from "./routes/reports.routes";
+import { workerLoop } from "./workers/document.worker";
 
 dotenv.config();
 
@@ -46,5 +47,9 @@ app.use("/api/v1/reports", reportsRoutes);
 
 app.listen(PORT, () => {
   console.log(`[bff-server] listening on http://localhost:${PORT}`);
+  // Start document OCR background processing worker
+  workerLoop().catch((err) => {
+    console.error("[bff-server] Background OCR worker error:", err.message);
+  });
 });
 

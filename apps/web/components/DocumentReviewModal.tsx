@@ -41,26 +41,36 @@ export function DocumentReviewModal({
       rows = document.extractedJson;
     } else if (document.extractedJson && Array.isArray(document.extractedJson.transactions)) {
       rows = document.extractedJson.transactions;
+    } else if (document.extractedJson && typeof document.extractedJson === "object" && (document.extractedJson.amount != null || document.extractedJson.merchant != null)) {
+      rows = [document.extractedJson];
+    } else if ((document as any).amount != null || (document as any).merchant != null) {
+      rows = [{
+        amount: (document as any).amount,
+        merchant: (document as any).merchant,
+        description: (document as any).description,
+        category: (document as any).category,
+        date: (document as any).date,
+      }];
     }
 
     if (rows.length > 0) {
       return rows.map((r) => ({
-        amount: r.amount ?? "",
-        category: r.category && CATEGORIES.includes(r.category) ? r.category : "Food",
+        amount: r.amount != null && !isNaN(Number(r.amount)) && Number(r.amount) > 0 ? Number(r.amount) : "",
+        category: r.category && CATEGORIES.includes(r.category) ? r.category : (CATEGORIES.includes("Other") ? "Other" : "Food"),
         transactionDate: r.transactionDate || r.transaction_date || r.date
           ? new Date(r.transactionDate || r.transaction_date || r.date).toISOString().slice(0, 10)
           : new Date().toISOString().slice(0, 10),
-        description: r.description ?? r.narration ?? r.vendor ?? r.title ?? "Extracted expense",
+        description: r.description ?? r.merchant ?? r.narration ?? r.vendor ?? r.title ?? "Extracted expense",
         accountId: r.accountId,
       }));
     }
 
     return [
       {
-        amount: "",
-        category: "Food",
-        transactionDate: new Date().toISOString().slice(0, 10),
-        description: document.title.replace(/\.[^/.]+$/, ""),
+        amount: (document as any).amount != null && !isNaN(Number((document as any).amount)) && Number((document as any).amount) > 0 ? Number((document as any).amount) : "",
+        category: (document as any).category && CATEGORIES.includes((document as any).category) ? (document as any).category : "Food",
+        transactionDate: (document as any).date || new Date().toISOString().slice(0, 10),
+        description: (document as any).merchant || (document as any).description || document.title.replace(/\.[^/.]+$/, ""),
       },
     ];
   })();

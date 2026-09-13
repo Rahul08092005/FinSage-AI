@@ -1,59 +1,34 @@
 """Document processing pipeline.
 
 Single entry point for the /internal/documents/process endpoint.
-Dispatches to the correct parser by doc_type, normalises the extracted
-rows, and computes an aggregate confidence score.
+Dispatches to the correct parser by doc_type and file extension,
+normalises the extracted rows, and computes an aggregate confidence score.
 
 Response contract (Aditi's worker depends on this exact shape):
     {
         "transactions": [ ...normalized rows... ],
-        "confidence":   float          # 0.0-1.0, average across all rows
-        # Optional error field populated when parsing or validation fails:
-        "error":        str
+        "confidence":   float,          # 0.0-1.0
+        "ocr_text":     str,            # raw extracted text
+        "error":        str | None
     }
-
-Step 5 -- image-PDF fallback:
-    If doc_type=="bank_statement" and pypdf returns no rows (scanned /
-    image-only PDF), the code tries to render each page to an image via
-    pdf2image and run OCR on each page image.  This requires the
-    external `poppler` utility to be installed on the system.  If
-    pdf2image or poppler is unavailable the fallback is skipped and the
-    empty-list result is returned (no silent crash).
 """
+import logging
 import os
-import warnings
 from typing import Any, Optional
 
-from app.analytics.categorization import categorize_transaction
 from app.analytics.normalization import normalize_batch
-from app.analytics.pii_masking import mask_pii
 from app.documents.confidence import score_extraction
-from app.documents.ocr_adapter import OCRAdapter
-from app.documents.pdf_parser import parse_bank_statement_pdf
+from app.documents.pdf_parser import parse_pdf_document
 from app.documents.receipt_parser import parse_receipt
 
-# Maximum allowed file size for document processing (10 MB)
-MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024
+logger = logging.getLogger("finsage.ocr.pipeline")
 
-# Allowed document types expected from upload endpoints
+MAX_DOCUMENT_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB
 ALLOWED_DOC_TYPES = {"receipt", "bank_statement", "other"}
 
 
 def validate_document_input(file_path: Optional[str], doc_type: Optional[str]) -> Optional[str]:
-    """Validate document input parameters before attempting to parse.
-
-    Checks:
-      1. file_path is provided and exists on disk.
-      2. File size is under the 10 MB limit.
-      3. doc_type is in {'receipt', 'bank_statement', 'other'}.
-
-    Args:
-        file_path: Path to the target document.
-        doc_type:  Document type string.
-
-    Returns:
-        Human-readable error message if validation fails, or None if valid.
-    """
+    """Validate document input parameters before attempting to parse."""
     if not file_path or not isinstance(file_path, str):
         return "File path is required."
 
@@ -64,7 +39,7 @@ def validate_document_input(file_path: Optional[str], doc_type: Optional[str]) -
         file_size = os.path.getsize(file_path)
         if file_size > MAX_DOCUMENT_SIZE_BYTES:
             size_mb = round(file_size / (1024 * 1024), 2)
-            return f"File size ({size_mb} MB) exceeds maximum allowed limit of 10 MB."
+            return f"File size ({size_mb} MB) exceeds maximum allowed limit of 25 MB."
     except Exception as exc:
         return f"Could not inspect file attributes: {exc}"
 
@@ -75,69 +50,8 @@ def validate_document_input(file_path: Optional[str], doc_type: Optional[str]) -
     return None
 
 
-def _image_pdf_fallback(pdf_path: str) -> list[dict]:
-    """Attempt to OCR a scanned (image-only) PDF page by page.
-
-    Requires:
-        pip install pdf2image
-        System: poppler  (https://poppler.freedesktop.org/)
-
-    If either dependency is missing, logs a warning and returns [].
-    """
-    try:
-        from pdf2image import convert_from_path  # type: ignore[import]
-    except ImportError:
-        warnings.warn(
-            "pdf2image is not installed -- image-PDF fallback unavailable. "
-            "Install with: pip install pdf2image  (also requires system poppler).",
-            ImportWarning,
-            stacklevel=3,
-        )
-        return []
-
-    rows: list[dict] = []
-    try:
-        pages = convert_from_path(pdf_path)
-        adapter = OCRAdapter()
-        for page_img in pages:
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                page_img.save(tmp.name)
-                tmp_path = tmp.name
-            try:
-                raw_text = mask_pii(adapter.extract_text(tmp_path))
-            finally:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-
-            first_line = (raw_text.strip().splitlines() or [""])[0][:120]
-            description = mask_pii(first_line)
-            rows.append({
-                "amount": None,
-                "date": None,
-                "description": description,
-                "category": categorize_transaction(description),
-                "raw_text": raw_text,
-            })
-    except Exception as exc:  # poppler not installed or PDF unreadable
-        warnings.warn(
-            f"image-PDF fallback failed ({exc}). "
-            "Make sure poppler is installed and on PATH.",
-            RuntimeWarning,
-            stacklevel=3,
-        )
-
-    return rows
-
-
 def _sanitize_for_normalize(rows: list[dict]) -> list[dict]:
-    """Replace None amount/date with safe defaults before passing to normalize_batch.
-
-    normalize_transaction() does float(raw.get("amount", 0)) which only falls
-    back to 0 when the key is *absent*, not when the value is explicitly None.
-    Parsers may return None for missing fields, so we coerce here rather than
-    modifying the existing normalize_transaction signature.
-    """
+    """Replace None amount/date with safe defaults before passing to normalize_batch."""
     sanitized = []
     for row in rows:
         r = dict(row)
@@ -150,84 +64,68 @@ def _sanitize_for_normalize(rows: list[dict]) -> list[dict]:
 
 
 def process_document(file_path: str, doc_type: str) -> dict[str, Any]:
-    """Parse a document and return normalised transactions with a confidence score.
+    """Parse a document and return normalised transactions with a confidence score."""
+    logger.info(f"[OCR] Processing started for file='{file_path}', type='{doc_type}'")
 
-    Args:
-        file_path: Path to the file on disk.
-        doc_type:  One of 'receipt', 'bank_statement', or 'other'.
-
-    Returns:
-        {
-            "transactions": list of dicts (normalised by normalize_batch),
-            "confidence":   float 0.0-1.0,
-            "error":        str (only present when parsing fails)
-        }
-        Never raises.
-    """
-    # 1. Input validation check
     validation_error = validate_document_input(file_path, doc_type)
     if validation_error:
+        logger.error(f"[OCR] Validation error: {validation_error}")
         return {
             "transactions": [],
             "confidence": 0.0,
+            "ocr_text": "",
             "error": validation_error,
         }
 
     raw_rows: list[dict] = []
+    ocr_text_accum = ""
 
     try:
-        if doc_type == "receipt":
-            # parse_receipt returns a single dict; wrap it for uniform processing
-            raw_rows = [parse_receipt(file_path)]
+        is_pdf = file_path.lower().endswith(".pdf")
 
-        elif doc_type == "bank_statement":
-            raw_rows = parse_bank_statement_pdf(file_path)
-            # If pypdf found no text (scanned/image-only PDF), try image fallback
-            if not raw_rows:
-                raw_rows = _image_pdf_fallback(file_path)
-
-            if not raw_rows:
-                return {
-                    "transactions": [],
-                    "confidence": 0.0,
-                    "error": "No transaction-shaped lines found in PDF",
-                }
-
+        if is_pdf or doc_type == "bank_statement":
+            raw_rows = parse_pdf_document(file_path, doc_type)
         else:
-            # doc_type == "other" or fallback
-            raw_text = mask_pii(OCRAdapter().extract_text(file_path))
-            first_line = (raw_text.strip().splitlines() or [""])[0][:120]
-            description = mask_pii(first_line)
-            raw_rows = [{
-                "amount": None,
-                "date": None,
-                "description": description,
-                "category": "Other",   # deliberately low-confidence
-                "raw_text": raw_text,
-            }]
+            # Receipt or general image
+            parsed = parse_receipt(file_path)
+            raw_rows = [parsed] if parsed else []
 
-    except ValueError as exc:
-        return {
-            "transactions": [],
-            "confidence": 0.0,
-            "error": str(exc),
-        }
+        if raw_rows:
+            ocr_text_accum = "\n".join(r.get("raw_text", "") for r in raw_rows if r.get("raw_text"))
+
     except Exception as exc:
+        logger.error(f"[OCR] Failed to process document: {exc}", exc_info=True)
         return {
             "transactions": [],
             "confidence": 0.0,
+            "ocr_text": "",
             "error": f"Failed to process document: {exc}",
         }
 
-    # Compute confidence BEFORE sanitizing -- we score raw extraction quality
+    # Calculate overall confidence score
     if raw_rows:
         confidence = round(
-            sum(score_extraction(r) for r in raw_rows) / len(raw_rows), 4
+            sum(score_extraction(r) for r in raw_rows) / len(raw_rows), 2
         )
     else:
         confidence = 0.0
 
-    # Sanitize None fields so normalize_transaction does not crash, then normalise
+    # Ensure amount and date fields in raw_rows are preserved as None if unreadable
+    # normalize_batch converts them for frontend consumption
     normalised = normalize_batch(_sanitize_for_normalize(raw_rows), source="ocr")
 
-    return {"transactions": normalised, "confidence": confidence}
+    # Restore None for amount if raw was None (normalize_batch turns missing to 0.0)
+    for idx, row in enumerate(raw_rows):
+        if idx < len(normalised) and row.get("amount") is None:
+            normalised[idx]["amount"] = None
+        if idx < len(normalised) and row.get("merchant"):
+            normalised[idx]["merchant"] = row["merchant"]
+
+    logger.info(f"[OCR] Processing completed: rows={len(normalised)}, confidence={confidence}")
+
+    return {
+        "transactions": normalised,
+        "confidence": confidence,
+        "ocr_text": ocr_text_accum[:2000],
+        "error": None,
+    }

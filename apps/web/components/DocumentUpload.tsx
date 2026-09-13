@@ -81,7 +81,7 @@ export function DocumentUpload({ token }: { token: string }) {
   }, [token]);
 
   // Setup review rows from doc or extractedJson
-  function setupReviewSection(doc: DocumentItem) {
+  function setupReviewSection(doc: any) {
     setInspectDoc(doc);
     setReviewError(null);
     setReviewSuccess(null);
@@ -91,14 +91,24 @@ export function DocumentUpload({ token }: { token: string }) {
       rawList = doc.extractedJson;
     } else if (doc.extractedJson && Array.isArray(doc.extractedJson.transactions)) {
       rawList = doc.extractedJson.transactions;
+    } else if (doc.extractedJson && typeof doc.extractedJson === "object" && (doc.extractedJson.amount != null || doc.extractedJson.merchant != null)) {
+      rawList = [doc.extractedJson];
+    } else if (doc.amount != null || doc.merchant != null) {
+      rawList = [{
+        amount: doc.amount,
+        merchant: doc.merchant,
+        description: doc.description,
+        category: doc.category,
+        date: doc.date,
+      }];
     }
 
     if (rawList.length > 0) {
       setReviewRows(
         rawList.map((r) => ({
-          amount: r.amount ?? "",
-          description: r.description ?? r.narration ?? r.vendor ?? r.title ?? "Extracted item",
-          category: r.category && CATEGORIES.includes(r.category) ? r.category : "Food",
+          amount: r.amount != null && !isNaN(Number(r.amount)) && Number(r.amount) > 0 ? Number(r.amount) : "",
+          description: r.description ?? r.merchant ?? r.narration ?? r.vendor ?? r.title ?? "Extracted item",
+          category: r.category && CATEGORIES.includes(r.category) ? r.category : (CATEGORIES.includes("Other") ? "Other" : "Food"),
           transactionDate: r.transactionDate || r.transaction_date || r.date
             ? new Date(r.transactionDate || r.transaction_date || r.date).toISOString().slice(0, 10)
             : new Date().toISOString().slice(0, 10),
@@ -108,10 +118,10 @@ export function DocumentUpload({ token }: { token: string }) {
     } else {
       setReviewRows([
         {
-          amount: "",
-          description: doc.title.replace(/\.[^/.]+$/, ""),
-          category: "Food",
-          transactionDate: new Date().toISOString().slice(0, 10),
+          amount: doc.amount != null && !isNaN(Number(doc.amount)) && Number(doc.amount) > 0 ? Number(doc.amount) : "",
+          description: doc.merchant || doc.description || doc.title.replace(/\.[^/.]+$/, ""),
+          category: doc.category && CATEGORIES.includes(doc.category) ? doc.category : "Food",
+          transactionDate: doc.date || new Date().toISOString().slice(0, 10),
         },
       ]);
     }

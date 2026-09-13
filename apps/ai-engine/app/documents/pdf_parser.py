@@ -1,42 +1,37 @@
-"""Bank-statement PDF parser.
+"""PDF document parser for receipts, invoices, and bank statements.
 
-Uses pypdf to extract text from each page and then applies a permissive
-regex that covers the two most common Indian bank-statement line shapes:
-
-  DD/MM/YYYY   description text   1234.56
-  DD-MM-YYYY   description text   Rs. 1234.56
-
-If pypdf is not installed (ImportError), the function falls back to
-returning an empty list with a warning -- same graceful-fallback pattern
-used by OCRAdapter for Tesseract.
+Supports:
+  1. Text-based PDFs via pypdf (fast native extraction)
+  2. Scanned/image-only PDFs via pypdfium2 page rendering + OCRAdapter
+  3. Multi-page document aggregation
+  4. Both tabular bank statements and single-purchase invoices/receipts
 """
+import logging
+import os
 import re
-from typing import Optional
+from typing import Any, List, Optional
 
 from app.analytics.categorization import categorize_transaction
 from app.analytics.pii_masking import mask_pii
+from app.documents.extractor import extract_financial_data
+from app.documents.ocr_adapter import OCRAdapter
 
-# ---------------------------------------------------------------------------
-# Regex for bank-statement lines
-# ---------------------------------------------------------------------------
-# Group 1: date (DD/MM/YYYY or DD-MM-YYYY)
-# Group 2: description (one or more words, non-greedy)
-# Group 3: amount (with optional "Rs." / "INR" prefix and commas)
+logger = logging.getLogger("finsage.ocr.pdf_parser")
+
+# Standard statement line pattern: Date   Description   Amount
 _STATEMENT_LINE = re.compile(
-    r"(\d{2}[\/\-]\d{2}[\/\-]\d{4})"   # date
+    r"(\d{2}[\/\-]\d{2}[\/\-]\d{4}|\d{4}[\/\-]\d{2}[\/\-]\d{2})"
     r"\s+"
-    r"(.+?)"                             # description (non-greedy)
+    r"(.+?)"
     r"\s+"
-    r"(?:Rs\.?\s*|INR\s*)?"             # optional currency label
-    r"([\d,]+(?:\.\d{1,2})?)"           # amount
+    r"(?:Rs\.?\s*|INR\s*|₹\s*)?"
+    r"([\d,]+(?:\.\d{1,2})?)"
     r"\s*$",
     re.IGNORECASE,
 )
 
 
-def _parse_line(line: str) -> Optional[dict]:
-    """Attempt to parse one text line into a transaction dict.  Returns None if
-    the line does not match the expected statement shape."""
+def _parse_statement_line(line: str) -> Optional[dict]:
     m = _STATEMENT_LINE.match(line.strip())
     if not m:
         return None
@@ -44,6 +39,8 @@ def _parse_line(line: str) -> Optional[dict]:
     date_str, description, amount_str = m.group(1), m.group(2).strip(), m.group(3)
     try:
         amount = float(amount_str.replace(",", ""))
+        if amount <= 0:
+            return None
     except ValueError:
         return None
 
@@ -51,44 +48,95 @@ def _parse_line(line: str) -> Optional[dict]:
         "amount": amount,
         "date": date_str,
         "description": mask_pii(description),
+        "merchant": mask_pii(description),
         "category": categorize_transaction(description),
+        "currency": "INR",
         "raw_text": mask_pii(line.strip()),
     }
 
 
-def parse_bank_statement_pdf(pdf_path: str) -> list[dict]:
-    """Extract transaction rows from a text-based bank-statement PDF.
-
-    Args:
-        pdf_path: Absolute or relative path to the PDF file.
-
-    Returns:
-        A list of dicts (amount, date, description, category, raw_text).
-        Raises ValueError if the file is corrupted, encrypted, or invalid PDF.
-    """
+def _render_pdf_to_images(pdf_path: str, max_pages: int = 5) -> List[Any]:
+    """Render PDF pages to PIL Images using pypdfium2 (requires no poppler)."""
+    images = []
     try:
-        import pypdf  # lazy import so the module loads even without pypdf
-    except ImportError:
-        # pypdf not installed -- return empty list with a console warning
-        import warnings
-        warnings.warn(
-            "pypdf is not installed. Install it with: pip install pypdf==4.3.1",
-            ImportWarning,
-            stacklevel=2,
-        )
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(pdf_path)
+        total_pages = min(len(pdf), max_pages)
+        for i in range(total_pages):
+            page = pdf[i]
+            # Render at 200 DPI (scale factor ~2.77)
+            pil_img = page.render(scale=2.0).to_pil()
+            images.append(pil_img)
+        pdf.close()
+    except Exception as exc:
+        logger.warning(f"[PDF] pypdfium2 rendering failed ({exc})")
+    return images
+
+
+def parse_pdf_document(pdf_path: str, doc_type: str = "receipt") -> List[dict]:
+    """Parse a PDF document (text or scanned).
+
+    Returns a list of transaction dicts.
+    """
+    if not os.path.isfile(pdf_path):
         return []
 
-    rows: list[dict] = []
+    full_text = ""
+    statement_rows = []
+
+    # 1. Try native text extraction using pypdf
     try:
+        import pypdf
         reader = pypdf.PdfReader(pdf_path)
         for page in reader.pages:
-            text = page.extract_text() or ""
-            for line in text.splitlines():
-                parsed = _parse_line(line)
-                if parsed:
-                    rows.append(parsed)
+            t = page.extract_text() or ""
+            if t.strip():
+                full_text += t + "\n"
+                for line in t.splitlines():
+                    parsed = _parse_statement_line(line)
+                    if parsed:
+                        statement_rows.append(parsed)
     except Exception as exc:
-        raise ValueError(f"Could not read PDF file — file may be corrupted, encrypted, or invalid ({exc})") from exc
+        logger.warning(f"[PDF] pypdf extraction error: {exc}")
 
-    return rows
+    # If it's a bank statement and we found multiple line-by-line statement rows:
+    if doc_type == "bank_statement" and len(statement_rows) >= 1:
+        logger.info(f"[PDF] Extracted {len(statement_rows)} bank statement rows via pypdf")
+        return statement_rows
 
+    # 2. If insufficient text was extracted (< 30 characters), render pages to images and OCR
+    if len(full_text.strip()) < 30:
+        logger.info(f"[PDF] Insufficient text extracted ({len(full_text)} chars). Rendering PDF pages to images for OCR...")
+        page_images = _render_pdf_to_images(pdf_path)
+        if page_images:
+            adapter = OCRAdapter()
+            ocr_texts = []
+            for idx, img in enumerate(page_images):
+                page_text = adapter.extract_text_from_pil(img)
+                if page_text.strip():
+                    ocr_texts.append(page_text)
+                    # Check for statement rows inside OCR text
+                    for line in page_text.splitlines():
+                        parsed = _parse_statement_line(line)
+                        if parsed:
+                            statement_rows.append(parsed)
+            full_text = "\n".join(ocr_texts)
+
+    if doc_type == "bank_statement" and statement_rows:
+        return statement_rows
+
+    # 3. For invoices or receipts (or fallback), run structured financial extraction on full_text
+    if full_text.strip():
+        extracted = extract_financial_data(full_text)
+        return [{
+            "amount": extracted.get("amount"),
+            "date": extracted.get("date"),
+            "description": extracted.get("description") or extracted.get("merchant") or "PDF Document",
+            "merchant": extracted.get("merchant"),
+            "category": extracted.get("category") or "Other",
+            "currency": extracted.get("currency") or "INR",
+            "confidence": extracted.get("confidence", 0.6),
+            "raw_text": full_text[:1000],
+        }]
+
+    return []
