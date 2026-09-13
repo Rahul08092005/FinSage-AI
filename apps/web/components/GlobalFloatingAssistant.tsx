@@ -46,21 +46,21 @@ const ROUTE_CONTEXTS: Record<string, ContextConfig> = {
     ],
   },
   goals: {
-    greeting: "Let's keep the money move going.",
-    sub: "Track your savings goals, target dates, and monthly contributions.",
+    greeting: "Your money has missions.",
+    sub: "Track your milestones, target deadlines, and stash progress.",
     suggestions: [
       "Am I on track?",
-      "How much should I save?",
       "Which goal needs attention?",
+      "How much is left to save?",
     ],
   },
   documents: {
-    greeting: "Got financial paperwork? Drop it.",
-    sub: "Parse bank statements, receipts, and invoices with OCR intelligence.",
+    greeting: "Paperwork detected. Want me to make sense of it?",
+    sub: "Parse receipts, audit OCR confidence, and verify extracted transactions.",
     suggestions: [
-      "Summarize my latest document",
+      "Summarize this document",
       "Find important amounts",
-      "Explain this statement",
+      "Which documents need review?",
     ],
   },
 };

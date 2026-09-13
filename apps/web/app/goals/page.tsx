@@ -6,8 +6,9 @@ import { GoalCard } from "@/components/GoalCard";
 export default function GoalsPage() {
   return (
     <AppShell
-      title="Savings Targets"
-      subtitle="Target capital milestones against maturity deadlines — Phase 2 Core."
+      title="Money Missions"
+      subtitle="Give your money somewhere to go."
+      hideHeader={true}
     >
       {(token) => <GoalCard token={token} />}
     </AppShell>

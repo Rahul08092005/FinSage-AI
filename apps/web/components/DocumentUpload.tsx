@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+
+import { useEffect, useRef, useState, useMemo } from "react";
 import { confirmDocument, getDocuments, getDocumentStatus, uploadDocument } from "@/lib/api";
 
 const CATEGORIES = ["Food", "Transport", "Shopping", "Bills", "Entertainment", "Other"];
@@ -29,6 +30,7 @@ export function DocumentUpload({ token }: { token: string }) {
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // 2. Active Polling & Current Document state
@@ -39,8 +41,8 @@ export function DocumentUpload({ token }: { token: string }) {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(true);
 
-  // 4. Review Section state (for status === NEEDS_REVIEW)
-  const [reviewDoc, setReviewDoc] = useState<DocumentItem | null>(null);
+  // 4. Preview / Review Modal state
+  const [inspectDoc, setInspectDoc] = useState<DocumentItem | null>(null);
   const [reviewRows, setReviewRows] = useState<EditableTransactionRow[]>([]);
   const [confirming, setConfirming] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
@@ -53,7 +55,6 @@ export function DocumentUpload({ token }: { token: string }) {
     }
   }
 
-  // Clear polling interval on unmount
   useEffect(() => {
     return () => {
       stopPolling();
@@ -77,11 +78,11 @@ export function DocumentUpload({ token }: { token: string }) {
 
   useEffect(() => {
     loadDocuments();
-  }, []);
+  }, [token]);
 
-  // Initialize review rows from extractedJson
+  // Setup review rows from doc or extractedJson
   function setupReviewSection(doc: DocumentItem) {
-    setReviewDoc(doc);
+    setInspectDoc(doc);
     setReviewError(null);
     setReviewSuccess(null);
 
@@ -113,6 +114,16 @@ export function DocumentUpload({ token }: { token: string }) {
           transactionDate: new Date().toISOString().slice(0, 10),
         },
       ]);
+    }
+  }
+
+  // Open inspection modal for any document
+  async function handleOpenDoc(doc: DocumentItem) {
+    try {
+      const full = await getDocumentStatus(token, doc.id);
+      setupReviewSection(full);
+    } catch {
+      setupReviewSection(doc);
     }
   }
 
@@ -148,10 +159,29 @@ export function DocumentUpload({ token }: { token: string }) {
     }
   }
 
+  // Handle Drag & Drop
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(true);
+  }
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(false);
+  }
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      setFile(e.dataTransfer.files[0]);
+      setUploadError(null);
+      setUploadMessage(null);
+    }
+  }
+
   // Handle upload
   async function handleUpload() {
     if (!file) {
-      setUploadError("Please select a file first");
+      setUploadError("Please select or drop a file first");
       return;
     }
 
@@ -161,7 +191,7 @@ export function DocumentUpload({ token }: { token: string }) {
 
     try {
       const res = await uploadDocument(token, file, docType);
-      setUploadMessage("Uploaded successfully. Processing queued.");
+      setUploadMessage("Deposited to Vault. OCR analysis active.");
 
       const initialDoc: DocumentItem = {
         id: res.documentId,
@@ -173,23 +203,21 @@ export function DocumentUpload({ token }: { token: string }) {
       };
       setCurrentDoc(initialDoc);
 
-      // Reset file input
       setFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
 
-      // Start polling every 2 seconds until no longer QUEUED/PROCESSING
       startPolling(res.documentId);
       loadDocuments();
     } catch (e: any) {
-      setUploadError(e.message || "Failed to upload document");
+      setUploadError(e.message || "Failed to deposit document into vault");
     } finally {
       setUploading(false);
     }
   }
 
-  // Review row editing
+  // Row changes inside review modal
   function handleRowChange(index: number, field: keyof EditableTransactionRow, value: string) {
     setReviewRows((prev) => {
       const updated = [...prev];
@@ -215,16 +243,16 @@ export function DocumentUpload({ token }: { token: string }) {
     setReviewRows((prev) => prev.filter((_, i) => i !== index));
   }
 
-  // Confirm all extracted rows
+  // Confirm extracted rows
   async function handleConfirmAll() {
-    if (!reviewDoc) return;
+    if (!inspectDoc) return;
 
     const invalid = reviewRows.some(
       (r) => !r.description?.trim() || isNaN(parseFloat(String(r.amount))) || parseFloat(String(r.amount)) <= 0
     );
 
     if (invalid) {
-      setReviewError("Each row must have a valid positive amount and description.");
+      setReviewError("Each item must have a valid positive amount and description.");
       return;
     }
 
@@ -240,22 +268,19 @@ export function DocumentUpload({ token }: { token: string }) {
         accountId: r.accountId,
       }));
 
-      await confirmDocument(token, reviewDoc.id, formatted);
-      setReviewSuccess("Transactions confirmed and recorded in ledger.");
+      await confirmDocument(token, inspectDoc.id, formatted);
+      setReviewSuccess("Transactions reconciled & recorded in ledger.");
 
-      // Refresh documents list
       await loadDocuments();
 
-      // Update currentDoc if same
-      if (currentDoc && currentDoc.id === reviewDoc.id) {
+      if (currentDoc && currentDoc.id === inspectDoc.id) {
         setCurrentDoc({ ...currentDoc, status: "COMPLETED" });
       }
 
-      // Close review section after brief confirmation
       setTimeout(() => {
-        setReviewDoc(null);
+        setInspectDoc(null);
         setReviewSuccess(null);
-      }, 1500);
+      }, 1400);
     } catch (e: any) {
       setReviewError(e.message || "Failed to confirm document");
     } finally {
@@ -263,335 +288,613 @@ export function DocumentUpload({ token }: { token: string }) {
     }
   }
 
-  // Load a past document into review
-  async function openReviewForDoc(doc: DocumentItem) {
-    try {
-      const full = await getDocumentStatus(token, doc.id);
-      setupReviewSection(full);
-    } catch (e) {
-      setupReviewSection(doc);
+  // Vault Summary Stats
+  const vaultStats = useMemo(() => {
+    const total = documents.length;
+    const completed = documents.filter((d) => d.status === "COMPLETED").length;
+    const needsReview = documents.filter((d) => d.status === "NEEDS_REVIEW").length;
+    const processing = documents.filter((d) => d.status === "QUEUED" || d.status === "PROCESSING").length;
+
+    const confList = documents
+      .map((d) => d.confidence)
+      .filter((c): c is number => typeof c === "number" && !isNaN(c));
+    const avgConfidence =
+      confList.length > 0 ? Math.round((confList.reduce((a, b) => a + b, 0) / confList.length) * 100) : 95;
+
+    return { total, completed, needsReview, processing, avgConfidence };
+  }, [documents]);
+
+  // Icon & styling helper based on document
+  function getDocIcon(docType: string, title: string) {
+    const lower = (docType + " " + title).toLowerCase();
+    if (lower.includes("statement") || lower.includes("bank") || lower.includes("salary") || lower.includes("hdfc")) {
+      return { icon: "🏦", badge: "BANK STATEMENT", color: "text-indigo-600 bg-indigo-50" };
     }
+    if (lower.includes("receipt") || lower.includes("coffee") || lower.includes("starbucks") || lower.includes("pharmacy")) {
+      return { icon: "🧾", badge: "RECEIPT", color: "text-lime-700 bg-lime-50" };
+    }
+    return { icon: "📄", badge: "INVOICE / DOC", color: "text-amber-700 bg-amber-50" };
   }
 
-  // Status badge helper using existing color tokens
-  function renderStatusBadge(status: string) {
+  // Render Status Pill
+  function renderStatusPill(status: string) {
     switch (status) {
-      case "QUEUED":
-      case "PROCESSING":
-        return (
-          <span className="inline-flex items-center gap-1 rounded border border-gold/40 bg-gold/15 px-2.5 py-0.5 text-xs font-semibold text-gold-dark uppercase tracking-wider">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gold" />
-            {status}
-          </span>
-        );
       case "COMPLETED":
         return (
-          <span className="inline-flex items-center gap-1 rounded border border-teal/30 bg-teal-tint px-2.5 py-0.5 text-xs font-semibold text-teal uppercase tracking-wider">
-            ✓ {status}
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-300/80 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+            ✓ RECONCILED
           </span>
         );
       case "NEEDS_REVIEW":
+        return (
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-300/80 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800">
+            ⚠ NEEDS REVIEW
+          </span>
+        );
+      case "QUEUED":
+      case "PROCESSING":
+        return (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-purple-50 border border-purple-200 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-purple-800">
+            <span className="h-1.5 w-1.5 rounded-full bg-purple-600 animate-ping" />
+            ◌ PROCESSING
+          </span>
+        );
       case "FAILED":
         return (
-          <span className="inline-flex items-center gap-1 rounded border border-rose/30 bg-rose-tint px-2.5 py-0.5 text-xs font-semibold text-rose uppercase tracking-wider">
-            ⚠ {status}
+          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 border border-rose-200 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-800">
+            ✕ EXTRACTION FAILED
           </span>
         );
       default:
         return (
-          <span className="rounded border border-line bg-paper px-2.5 py-0.5 text-xs font-semibold text-ink-muted uppercase tracking-wider">
-            {status}
+          <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 border border-stone-200 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-stone-600">
+            ✦ {status}
           </span>
         );
     }
   }
 
-  return (
-    <div className="rounded-lg border border-line bg-paper-sheet p-6 shadow-subtle">
-      {/* 1. Document Upload Form (styled consistently with TransactionsTable's add-form) */}
-      <div className="border-b border-line pb-5">
-        <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-          New Document Voucher
-        </p>
-
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* File Input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,.png,.jpg,.jpeg,.csv"
-            onChange={handleFileChange}
-            className="rounded-md border border-line bg-paper px-3 py-1.5 text-sm text-ink file:mr-3 file:rounded file:border-0 file:bg-ink file:px-3 file:py-1 file:text-xs file:font-medium file:text-paper-sheet hover:file:bg-ink-light focus:border-teal focus:bg-paper-sheet focus:outline-none focus:ring-1 focus:ring-teal/30"
+  // Render OCR Confidence Visual Indicator
+  function renderConfidenceMeter(conf: number | null) {
+    if (conf == null) {
+      return <span className="text-[10px] font-semibold text-stone-400 italic">CALCULATING…</span>;
+    }
+    const pct = Math.round(conf * 100);
+    const isHigh = pct >= 80;
+    return (
+      <div className="flex items-center gap-2">
+        <div className="w-14 h-1.5 rounded-full bg-stone-100 overflow-hidden">
+          <div
+            className={`h-full rounded-full ${isHigh ? "bg-lime-500" : "bg-amber-500"}`}
+            style={{ width: `${pct}%` }}
           />
-
-          {/* DocType Select */}
-          <select
-            className="rounded-md border border-line bg-paper px-3 py-2 text-sm font-medium text-ink transition focus:border-teal focus:bg-paper-sheet focus:outline-none focus:ring-1 focus:ring-teal/30"
-            value={docType}
-            onChange={(e) => setDocType(e.target.value as "receipt" | "bank_statement")}
-          >
-            <option value="receipt">receipt</option>
-            <option value="bank_statement">bank_statement</option>
-          </select>
-
-          {/* Upload Button */}
-          <button
-            onClick={handleUpload}
-            disabled={!file || uploading}
-            className="rounded-md bg-teal px-4 py-2 text-sm font-medium text-paper-sheet shadow-subtle transition-all hover:bg-teal-dark disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
-          >
-            {uploading ? "Uploading…" : "Upload Document"}
-          </button>
-
-          {uploadMessage && (
-            <span className="inline-flex items-center gap-1 rounded border border-teal/30 bg-teal-tint px-2.5 py-1 text-xs font-medium text-teal">
-              ✓ {uploadMessage}
-            </span>
-          )}
-
-          {uploadError && (
-            <span className="inline-flex items-center gap-1 rounded border border-rose/30 bg-rose-tint px-2.5 py-1 text-xs font-medium text-rose">
-              ⚠ {uploadError}
-            </span>
-          )}
         </div>
+        <span className={`text-[10px] font-bold ${isHigh ? "text-stone-700" : "text-amber-800"}`}>
+          {pct}% {isHigh ? "CONFIDENT" : "NEEDS A LOOK 👀"}
+        </span>
+      </div>
+    );
+  }
 
-        {/* 3. Current Processing Status Badge */}
-        {currentDoc && (
-          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-md border border-line/70 bg-paper/40 p-3">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-              Current Document Status:
+  return (
+    <div className="space-y-4">
+      {/* 1. VAULT HERO HEADER */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-stone-200/80 pb-3">
+        <div>
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="inline-flex items-center gap-1 rounded-full bg-lime-400/25 border border-lime-500/30 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[#18122B]">
+              ● VAULT SECURE
             </span>
-            <span className="font-mono text-xs font-semibold text-ink">{currentDoc.title}</span>
-            <span className="inline-block rounded border border-line bg-paper px-2 py-0.5 text-[11px] text-ink-muted uppercase">
-              {currentDoc.docType}
+            <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-indigo-700">
+              ✦ OCR READY
             </span>
-            {renderStatusBadge(currentDoc.status)}
-            {currentDoc.confidence != null && (
-              <span className="font-serif text-xs tabular-nums text-ink-muted">
-                Confidence: {Math.round(currentDoc.confidence * 100)}%
+            {uploadMessage && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 animate-in fade-in">
+                ✓ {uploadMessage}
               </span>
             )}
+          </div>
+          <h1 className="font-serif text-2xl sm:text-3xl font-bold tracking-tight text-[#18122B]">
+            THE FINSAGE VAULT.
+          </h1>
+          <p className="text-xs sm:text-sm text-stone-500 font-medium">
+            Drop the paperwork. Let FinSage make sense of it. Receipts, statements, and financial vouchers parsed with AI.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[#18122B] px-4 py-2 text-xs font-semibold text-white shadow-md hover:bg-stone-800 hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer"
+          >
+            <span>✦</span>
+            <span>+ Upload Document</span>
+            <span className="text-lime-400 font-bold">→</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 2. VAULT SNAPSHOT CARD */}
+      <div className="rounded-[22px] border border-stone-200/90 bg-[#FFFDF8] p-4 sm:p-5 shadow-sm transition">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-6">
+          <div>
+            <p className="text-[10px] font-bold tracking-wider uppercase text-stone-400">
+              VAULT DOCUMENTS
+            </p>
+            <p className="font-serif text-2xl sm:text-3xl font-bold text-[#18122B] mt-0.5">
+              {vaultStats.total}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-[10px] font-bold tracking-wider uppercase text-stone-400">
+              RECONCILED
+            </p>
+            <p className="font-serif text-2xl sm:text-3xl font-bold text-emerald-700 mt-0.5">
+              {vaultStats.completed}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-[10px] font-bold tracking-wider uppercase text-stone-400">
+              NEEDS REVIEW
+            </p>
+            <p className="font-serif text-2xl sm:text-3xl font-bold text-amber-700 mt-0.5">
+              {vaultStats.needsReview}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-[10px] font-bold tracking-wider uppercase text-stone-400">
+              AVG OCR CONFIDENCE
+            </p>
+            <div className="mt-0.5 flex items-baseline gap-2">
+              <span className="font-serif text-2xl sm:text-3xl font-bold text-[#18122B]">
+                {vaultStats.avgConfidence}%
+              </span>
+              <span className="text-[10px] font-bold text-lime-700 uppercase tracking-wide">
+                HIGH
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. COMPACT UPLOAD DROP ZONE */}
+      <div
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`relative rounded-[22px] border-2 border-dashed p-4 sm:p-5 transition duration-200 text-center ${
+          isDragOver
+            ? "border-lime-500 bg-lime-50/50 scale-[1.01]"
+            : "border-stone-300/80 bg-[#FFFDF8] hover:border-stone-400"
+        }`}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.png,.jpg,.jpeg,.csv"
+          onChange={handleFileChange}
+          className="hidden"
+        />
+
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-left">
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 rounded-2xl bg-lime-400/25 border border-lime-500/30 flex items-center justify-center text-xl shrink-0">
+              ✦
+            </div>
+            <div>
+              <p className="font-serif text-base sm:text-lg font-bold text-[#18122B] tracking-tight">
+                {file ? file.name : "DROP IT HERE, OR CHOOSE A FILE."}
+              </p>
+              <p className="text-xs text-stone-500 font-medium">
+                {file
+                  ? `${(file.size / 1024).toFixed(1)} KB · Ready to deposit`
+                  : "Upload receipts, invoices, or bank statements — JPG, PNG, PDF, CSV"}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            {/* DocType Segmented Pill */}
+            <div className="inline-flex rounded-full bg-stone-100 p-0.5 border border-stone-200 text-[11px] font-semibold">
+              <button
+                type="button"
+                onClick={() => setDocType("receipt")}
+                className={`rounded-full px-3 py-1 transition cursor-pointer ${
+                  docType === "receipt" ? "bg-[#18122B] text-white shadow-xs" : "text-stone-600 hover:text-[#18122B]"
+                }`}
+              >
+                Receipt
+              </button>
+              <button
+                type="button"
+                onClick={() => setDocType("bank_statement")}
+                className={`rounded-full px-3 py-1 transition cursor-pointer ${
+                  docType === "bank_statement"
+                    ? "bg-[#18122B] text-white shadow-xs"
+                    : "text-stone-600 hover:text-[#18122B]"
+                }`}
+              >
+                Bank Statement
+              </button>
+            </div>
+
+            {/* Choose file CTA */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded-full border border-stone-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-50 transition cursor-pointer"
+            >
+              Choose file
+            </button>
+
+            {/* Upload Button */}
+            <button
+              type="button"
+              onClick={handleUpload}
+              disabled={!file || uploading}
+              className="rounded-full bg-[#18122B] px-4 py-1.5 text-xs font-semibold text-white shadow-md hover:bg-stone-800 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer flex items-center gap-1.5"
+            >
+              {uploading ? (
+                <>
+                  <span className="h-3 w-3 animate-spin rounded-full border border-white border-t-transparent" />
+                  <span>Scanning…</span>
+                </>
+              ) : (
+                <>
+                  <span>Deposit →</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {uploadError && (
+          <p className="mt-2 text-left text-xs font-semibold text-rose-700">
+            ⚠ {uploadError}
+          </p>
+        )}
+
+        {/* Live Processing Banner if a document was just uploaded */}
+        {currentDoc && (currentDoc.status === "QUEUED" || currentDoc.status === "PROCESSING") && (
+          <div className="mt-3 flex items-center justify-between rounded-xl bg-purple-50 border border-purple-200/80 p-2.5 text-left animate-pulse">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-purple-600 animate-ping" />
+              <p className="text-xs font-semibold text-purple-900">
+                OCR Scanner analyzing <span className="font-mono">{currentDoc.title}</span>…
+              </p>
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700">
+              IN FLIGHT
+            </span>
           </div>
         )}
       </div>
 
-      {/* 5. Review Section (Rendered when document status is NEEDS_REVIEW) */}
-      {reviewDoc && (
-        <div className="my-6 rounded-md border border-gold/40 bg-gold/10 p-5">
-          <div className="flex flex-wrap items-center justify-between border-b border-gold/30 pb-3 gap-2">
-            <div>
-              <span className="rounded border border-rose/30 bg-rose-tint px-2 py-0.5 text-[10px] font-semibold text-rose uppercase tracking-wider">
-                Needs Review
-              </span>
-              <h3 className="mt-1 font-serif text-lg font-semibold text-ink">
-                Review Extracted Transactions — {reviewDoc.title}
-              </h3>
-              <p className="text-xs text-ink-muted">
-                Low-confidence or automated extraction requires ledger verification before confirmation.
-              </p>
+      {/* 4. COLLECTIBLE DOCUMENT CARDS GRID */}
+      <div>
+        <div className="flex items-center justify-between mb-2.5">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-stone-400">
+            VAULT RECORDS ({documents.length})
+          </p>
+          <button
+            onClick={loadDocuments}
+            className="rounded-full border border-stone-200 bg-[#FFFDF8] px-3 py-1 text-xs font-semibold text-stone-600 hover:text-[#18122B] transition cursor-pointer"
+          >
+            ↻ Refresh Vault
+          </button>
+        </div>
+
+        {loadingDocs ? (
+          <div className="py-16 text-center">
+            <div className="inline-block h-7 w-7 animate-spin rounded-full border-2 border-[#18122B] border-t-transparent mb-3" />
+            <p className="font-serif text-sm italic text-stone-500">
+              Unlocking Vault records…
+            </p>
+          </div>
+        ) : documents.length === 0 ? (
+          <div className="rounded-[24px] border border-dashed border-stone-300 bg-[#FFFDF8] p-8 sm:p-12 text-center">
+            <div className="mx-auto w-14 h-14 rounded-full bg-lime-400/30 flex items-center justify-center text-2xl mb-4 shadow-sm">
+              📁
+            </div>
+            <h3 className="font-serif text-xl sm:text-2xl font-bold text-[#18122B] tracking-tight">
+              YOUR VAULT IS READY FOR PAPERWORK.
+            </h3>
+            <p className="mt-1.5 text-xs sm:text-sm text-stone-500 max-w-md mx-auto font-medium">
+              Drop payment receipts, invoices, or statements above. FinSage OCR will scan, categorize, and extract items directly into your money trail.
+            </p>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#18122B] px-5 py-2.5 text-xs font-semibold text-white shadow-md hover:bg-stone-800 transition cursor-pointer"
+            >
+              <span>+ Deposit your first document</span>
+              <span className="text-lime-400 font-bold">✨</span>
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {documents.map((d) => {
+              const info = getDocIcon(d.docType, d.title);
+              const formattedDate = new Date(d.uploadedAt)
+                .toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                .toUpperCase();
+
+              return (
+                <div
+                  key={d.id}
+                  onClick={() => handleOpenDoc(d)}
+                  className="group relative flex flex-col justify-between rounded-[22px] border border-stone-200/80 bg-[#FFFDF8] p-4 sm:p-5 shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-xl hover:border-stone-300 cursor-pointer overflow-hidden"
+                >
+                  {/* Card Top: Icon, DocType Badge, Upload Date */}
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl p-1.5 rounded-xl bg-stone-100 shadow-2xs">
+                          {info.icon}
+                        </span>
+                        <span className="text-[10px] font-bold tracking-wider uppercase text-stone-400">
+                          {info.badge}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-semibold text-stone-400 uppercase">
+                        {formattedDate}
+                      </span>
+                    </div>
+
+                    {/* Document Title */}
+                    <h3 className="font-mono text-xs sm:text-sm font-semibold text-[#18122B] truncate tracking-tight">
+                      {d.title}
+                    </h3>
+
+                    {/* OCR Confidence */}
+                    <div className="mt-3.5 pt-3 border-t border-stone-100 flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+                        OCR SCORE
+                      </span>
+                      {renderConfidenceMeter(d.confidence)}
+                    </div>
+                  </div>
+
+                  {/* Card Bottom: Status Pill + Action */}
+                  <div className="mt-4 pt-3 border-t border-stone-100 flex items-center justify-between gap-2">
+                    {renderStatusPill(d.status)}
+
+                    <div className="flex items-center gap-1">
+                      <span className="text-[11px] font-semibold text-stone-500 group-hover:text-[#18122B] transition">
+                        {d.status === "NEEDS_REVIEW" ? "Review" : "Details"}
+                      </span>
+                      <span className="h-6 w-6 rounded-full bg-stone-100 flex items-center justify-center text-xs text-stone-600 group-hover:bg-[#18122B] group-hover:text-white transition">
+                        →
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 5. DOCUMENT PREVIEW / REVIEW MODAL */}
+      {inspectDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[26px] border border-stone-200/80 bg-[#FAF7F2] p-5 sm:p-6 shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-stone-200/80 pb-3">
+              <div className="flex items-center gap-2.5">
+                <span className="text-2xl p-2 rounded-2xl bg-white shadow-xs">
+                  {getDocIcon(inspectDoc.docType, inspectDoc.title).icon}
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold tracking-wider uppercase text-stone-400">
+                      VAULT RECORD
+                    </span>
+                    {renderStatusPill(inspectDoc.status)}
+                  </div>
+                  <h3 className="font-mono text-sm sm:text-base font-bold text-[#18122B] truncate max-w-md">
+                    {inspectDoc.title}
+                  </h3>
+                </div>
+              </div>
+              <button
+                onClick={() => setInspectDoc(null)}
+                className="rounded-full p-1.5 text-stone-400 hover:bg-stone-200/60 hover:text-[#18122B] transition"
+              >
+                ✕
+              </button>
             </div>
 
-            <button
-              onClick={() => setReviewDoc(null)}
-              className="rounded border border-line bg-paper px-2.5 py-1 text-xs font-medium text-ink-muted transition hover:bg-paper-sheet hover:text-ink"
-            >
-              Close Review
-            </button>
-          </div>
+            {/* Modal Metadata Snapshot */}
+            <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3 rounded-2xl bg-white p-3.5 border border-stone-200/70">
+              <div>
+                <span className="text-[10px] font-bold text-stone-400 uppercase">TYPE</span>
+                <p className="text-xs font-semibold text-[#18122B] uppercase mt-0.5">
+                  {inspectDoc.docType.replace("_", " ")}
+                </p>
+              </div>
+              <div>
+                <span className="text-[10px] font-bold text-stone-400 uppercase">DEPOSITED</span>
+                <p className="text-xs font-semibold text-[#18122B] mt-0.5">
+                  {new Date(inspectDoc.uploadedAt).toLocaleDateString("en-IN", {
+                    day: "2-digit",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </p>
+              </div>
+              <div>
+                <span className="text-[10px] font-bold text-stone-400 uppercase">OCR CONFIDENCE</span>
+                <div className="mt-0.5">
+                  {renderConfidenceMeter(inspectDoc.confidence)}
+                </div>
+              </div>
+            </div>
 
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-line text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-                  <th className="w-36 py-2">Date</th>
-                  <th className="py-2">Description</th>
-                  <th className="w-40 py-2">Category</th>
-                  <th className="w-32 py-2 pr-2 text-right">Amount (₹)</th>
-                  <th className="w-10 py-2"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line/60">
-                {reviewRows.map((row, idx) => (
-                  <tr key={idx} className="transition-colors hover:bg-paper/30">
-                    <td className="py-2 pr-2">
-                      <input
-                        type="date"
-                        className="w-full rounded border border-line bg-paper px-2 py-1.5 text-xs text-ink transition focus:border-teal focus:bg-paper-sheet focus:outline-none focus:ring-1 focus:ring-teal/30"
-                        value={row.transactionDate}
-                        onChange={(e) => handleRowChange(idx, "transactionDate", e.target.value)}
-                      />
-                    </td>
-                    <td className="py-2 pr-2">
-                      <input
-                        type="text"
-                        placeholder="Description"
-                        className="w-full rounded border border-line bg-paper px-2.5 py-1.5 text-xs text-ink transition focus:border-teal focus:bg-paper-sheet focus:outline-none focus:ring-1 focus:ring-teal/30"
-                        value={row.description}
-                        onChange={(e) => handleRowChange(idx, "description", e.target.value)}
-                      />
-                    </td>
-                    <td className="py-2 pr-2">
-                      <select
-                        className="w-full rounded border border-line bg-paper px-2 py-1.5 text-xs font-medium text-ink transition focus:border-teal focus:bg-paper-sheet focus:outline-none focus:ring-1 focus:ring-teal/30"
-                        value={row.category}
-                        onChange={(e) => handleRowChange(idx, "category", e.target.value)}
-                      >
-                        {CATEGORIES.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="py-2 pr-2">
-                      <div className="relative">
-                        <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2 font-serif text-xs font-semibold text-ink-subtle">
-                          ₹
-                        </span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="0.00"
-                          className="w-full rounded border border-line bg-paper py-1.5 pl-5 pr-2 text-right font-serif text-xs font-semibold tabular-nums text-ink transition focus:border-teal focus:bg-paper-sheet focus:outline-none focus:ring-1 focus:ring-teal/30"
-                          value={row.amount}
-                          onChange={(e) => handleRowChange(idx, "amount", e.target.value)}
-                        />
-                      </div>
-                    </td>
-                    <td className="py-2 text-center">
-                      {reviewRows.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveRow(idx)}
-                          className="rounded px-1.5 py-1 text-xs text-rose transition hover:bg-rose-tint"
-                          title="Remove item"
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+            {/* Extracted Transactions Editor / Auditor */}
+            <div className="mt-4">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <h4 className="font-serif text-sm font-bold text-[#18122B]">
+                    {inspectDoc.status === "NEEDS_REVIEW"
+                      ? "Verify Extracted Transactions"
+                      : "Extracted Financial Items"}
+                  </h4>
+                  <p className="text-[11px] text-stone-500">
+                    {inspectDoc.status === "NEEDS_REVIEW"
+                      ? "Review and correct amounts before committing to your ledger."
+                      : "Transactions successfully verified and registered into your financial trail."}
+                  </p>
+                </div>
+                {inspectDoc.status === "NEEDS_REVIEW" && (
+                  <button
+                    type="button"
+                    onClick={handleAddRow}
+                    className="rounded-full border border-stone-200 bg-white px-3 py-1 text-[11px] font-semibold text-[#18122B] hover:bg-stone-50 transition cursor-pointer"
+                  >
+                    + Add Row
+                  </button>
+                )}
+              </div>
 
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pt-2">
-            <button
-              type="button"
-              onClick={handleAddRow}
-              className="rounded border border-line bg-paper px-3 py-1.5 text-xs font-medium text-ink transition hover:bg-paper-sheet focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
-            >
-              + Add Row
-            </button>
+              {/* Editable Table */}
+              <div className="rounded-2xl border border-stone-200/80 bg-white overflow-hidden shadow-xs">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-stone-100 bg-[#FAF7F2] text-[10px] font-bold uppercase tracking-wider text-stone-400">
+                        <th className="py-2.5 px-3">Date</th>
+                        <th className="py-2.5 px-3">Description</th>
+                        <th className="py-2.5 px-3">Category</th>
+                        <th className="py-2.5 px-3 text-right">Amount (₹)</th>
+                        {inspectDoc.status === "NEEDS_REVIEW" && <th className="py-2.5 px-2 w-8"></th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {reviewRows.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-stone-50/50 transition">
+                          <td className="py-2 px-3">
+                            {inspectDoc.status === "NEEDS_REVIEW" ? (
+                              <input
+                                type="date"
+                                className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs text-[#18122B] focus:border-[#18122B] focus:outline-none"
+                                value={row.transactionDate}
+                                onChange={(e) => handleRowChange(idx, "transactionDate", e.target.value)}
+                              />
+                            ) : (
+                              <span className="font-mono text-stone-600">{row.transactionDate}</span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3">
+                            {inspectDoc.status === "NEEDS_REVIEW" ? (
+                              <input
+                                type="text"
+                                placeholder="Description"
+                                className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs text-[#18122B] focus:border-[#18122B] focus:outline-none"
+                                value={row.description}
+                                onChange={(e) => handleRowChange(idx, "description", e.target.value)}
+                              />
+                            ) : (
+                              <span className="font-medium text-[#18122B]">{row.description}</span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3">
+                            {inspectDoc.status === "NEEDS_REVIEW" ? (
+                              <select
+                                className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-[#18122B] focus:border-[#18122B] focus:outline-none"
+                                value={row.category}
+                                onChange={(e) => handleRowChange(idx, "category", e.target.value)}
+                              >
+                                {CATEGORIES.map((c) => (
+                                  <option key={c} value={c}>
+                                    {c}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="inline-block rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600 uppercase">
+                                {row.category}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            {inspectDoc.status === "NEEDS_REVIEW" ? (
+                              <div className="relative inline-block w-28">
+                                <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2 font-serif text-xs font-bold text-stone-400">
+                                  ₹
+                                </span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  className="w-full rounded-lg border border-stone-200 bg-white py-1 pl-5 pr-2 text-right font-serif text-xs font-bold tabular-nums text-[#18122B] focus:border-[#18122B] focus:outline-none"
+                                  value={row.amount}
+                                  onChange={(e) => handleRowChange(idx, "amount", e.target.value)}
+                                />
+                              </div>
+                            ) : (
+                              <span className="font-serif font-bold text-[#18122B] tabular-nums">
+                                ₹ {Number(row.amount).toLocaleString("en-IN")}
+                              </span>
+                            )}
+                          </td>
+                          {inspectDoc.status === "NEEDS_REVIEW" && (
+                            <td className="py-2 px-2 text-center">
+                              {reviewRows.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveRow(idx)}
+                                  className="rounded p-1 text-stone-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
 
-            <div className="flex items-center gap-3">
               {reviewError && (
-                <span className="text-xs font-medium text-rose">⚠ {reviewError}</span>
+                <p className="mt-2 text-xs font-semibold text-rose-700">
+                  ⚠ {reviewError}
+                </p>
               )}
               {reviewSuccess && (
-                <span className="text-xs font-medium text-teal">✓ {reviewSuccess}</span>
+                <p className="mt-2 text-xs font-semibold text-emerald-700">
+                  ✓ {reviewSuccess}
+                </p>
               )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="mt-5 flex items-center justify-between pt-3 border-t border-stone-200/80">
               <button
                 type="button"
-                onClick={handleConfirmAll}
-                disabled={confirming}
-                className="rounded-md bg-teal px-5 py-2 text-xs font-semibold text-paper-sheet shadow-subtle transition-all hover:bg-teal-dark disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
+                onClick={() => setInspectDoc(null)}
+                className="rounded-full border border-stone-300 bg-white px-4 py-2 text-xs font-semibold text-stone-600 hover:bg-stone-50 transition cursor-pointer"
               >
-                {confirming ? "Confirming…" : "Confirm all"}
+                Close
               </button>
+
+              {inspectDoc.status === "NEEDS_REVIEW" && (
+                <button
+                  type="button"
+                  onClick={handleConfirmAll}
+                  disabled={confirming}
+                  className="rounded-full bg-[#18122B] px-5 py-2 text-xs font-semibold text-white shadow-md hover:bg-stone-800 disabled:opacity-40 transition cursor-pointer flex items-center gap-1.5"
+                >
+                  {confirming ? "Reconciling…" : "Confirm all to Ledger →"}
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
-
-      {/* 4. Past Documents List (same hairline-row style as TransactionsTable) */}
-      <div className="mt-6 overflow-x-auto">
-        <div className="mb-3 flex items-center justify-between">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-            Past Documents Ledger
-          </p>
-          <button
-            onClick={loadDocuments}
-            className="rounded border border-line bg-paper px-2.5 py-1 text-xs font-medium text-ink transition-colors hover:bg-paper-sheet focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal"
-          >
-            ↻ Refresh
-          </button>
-        </div>
-
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-line text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-              <th className="py-2.5 pl-1 font-semibold">Date Uploaded</th>
-              <th className="py-2.5 font-semibold">Title / Particulars</th>
-              <th className="py-2.5 font-semibold">Type</th>
-              <th className="py-2.5 font-semibold">Status</th>
-              <th className="py-2.5 font-semibold">Confidence</th>
-              <th className="py-2.5 pr-1 text-right font-semibold">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loadingDocs && (
-              <tr>
-                <td colSpan={6} className="py-8 text-center font-serif text-sm italic text-ink-muted">
-                  Retrieving ledger records…
-                </td>
-              </tr>
-            )}
-
-            {!loadingDocs && documents.length === 0 && (
-              <tr>
-                <td colSpan={6} className="py-8 text-center font-serif text-sm italic text-ink-muted">
-                  No documents in ledger — upload a document above.
-                </td>
-              </tr>
-            )}
-
-            {!loadingDocs &&
-              documents.map((d) => (
-                <tr
-                  key={d.id}
-                  className="border-b border-line/60 transition-colors hover:bg-paper/40"
-                >
-                  <td className="py-3 pl-1 text-xs text-ink-muted">
-                    {new Date(d.uploadedAt).toLocaleDateString("en-IN", {
-                      day: "2-digit",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </td>
-                  <td className="py-3 font-mono text-xs font-medium text-ink">
-                    {d.title}
-                  </td>
-                  <td className="py-3">
-                    <span className="inline-block rounded border border-line bg-paper px-2 py-0.5 text-[11px] font-medium text-ink-muted uppercase">
-                      {d.docType.replace("_", " ")}
-                    </span>
-                  </td>
-                  <td className="py-3">{renderStatusBadge(d.status)}</td>
-                  <td className="py-3 font-serif text-xs tabular-nums text-ink">
-                    {d.confidence != null ? `${Math.round(d.confidence * 100)}%` : "—"}
-                  </td>
-                  <td className="py-3 pr-1 text-right">
-                    {d.status === "NEEDS_REVIEW" ? (
-                      <button
-                        onClick={() => openReviewForDoc(d)}
-                        className="rounded border border-rose/30 bg-rose-tint px-2.5 py-1 text-xs font-semibold text-rose transition hover:bg-rose hover:text-paper-sheet focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose"
-                      >
-                        Review
-                      </button>
-                    ) : d.status === "COMPLETED" ? (
-                      <span className="text-xs text-teal font-medium">Reconciled</span>
-                    ) : (
-                      <span className="text-xs text-ink-subtle italic">Processing</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }

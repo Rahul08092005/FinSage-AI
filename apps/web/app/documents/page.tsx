@@ -6,8 +6,9 @@ import { DocumentUpload } from "@/components/DocumentUpload";
 export default function DocumentsPage() {
   return (
     <AppShell
-      title="Document Upload"
-      subtitle="Live OCR extraction, status tracking, and extraction review — Phase 3."
+      title="The FinSage Vault"
+      subtitle="Drop the paperwork. Let FinSage make sense of it."
+      hideHeader={true}
     >
       {(token) => <DocumentUpload token={token} />}
     </AppShell>
