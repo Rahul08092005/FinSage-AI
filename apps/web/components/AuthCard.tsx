@@ -126,20 +126,26 @@ export function AuthCard({
           localStorage.removeItem("finsage_remembered_email");
         }
         localStorage.setItem("finsage_token", data.token);
-        setSuccessMsg("Welcome back! Redirecting to your ledger...");
+        setSuccessMsg("Welcome back! Entering your workspace...");
         setTimeout(() => {
           window.location.href = returnTo;
-        }, 600);
+        }, 500);
       } else {
         const data = await registerUser({ name, email, password });
         localStorage.setItem("finsage_token", data.token);
-        setSuccessMsg("Account created! Flipping your financial dashboard...");
+        setSuccessMsg("Account created! Redirecting to your ledger...");
         setTimeout(() => {
           window.location.href = returnTo;
-        }, 600);
+        }, 500);
       }
     } catch (err: any) {
-      setError(err.message || "Authentication failed. Please check your credentials.");
+      if (err.message === "Failed to fetch" || err.message?.includes("fetch")) {
+        setError(
+          "Cannot connect to the FinSage BFF backend (http://localhost:4000). Please ensure the backend server and Docker are running."
+        );
+      } else {
+        setError(err.message || "Authentication failed. Please check your credentials.");
+      }
     } finally {
       setLoading(false);
     }
@@ -152,96 +158,81 @@ export function AuthCard({
   }
 
   return (
-    <div className="relative w-full max-w-md mx-auto">
-      {/* Playful Ambient Halos (Fintech Energy) */}
+    <div className="relative w-full max-w-[460px] mx-auto">
+      {/* Subtle Ambient Glow (Fintech Energy) */}
       {!compact && (
         <>
-          <div className="pointer-events-none absolute -top-10 -left-12 h-44 w-44 rounded-full bg-[#84cc16]/25 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-10 -right-12 h-44 w-44 rounded-full bg-[#6366f1]/20 blur-3xl" />
-          <div className="pointer-events-none absolute top-1/2 -right-8 h-28 w-28 rounded-full bg-amber-400/20 blur-2xl" />
-
-          {/* Floating Playful Accents (Inspired by Funky Fintech Energy) */}
-          <div className="pointer-events-none hidden lg:block absolute -left-20 top-8 z-10 animate-bounce duration-1000">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-line bg-paper-sheet p-2 shadow-ledger rotate-[-12deg]">
-              <span className="text-xl">💰</span>
-            </div>
-          </div>
-
-          <div className="pointer-events-none hidden lg:block absolute -right-20 bottom-12 z-10 animate-pulse">
-            <div className="flex items-center gap-2 rounded-2xl border border-line bg-paper-sheet px-3 py-1.5 shadow-ledger rotate-[8deg]">
-              <span className="h-2 w-2 rounded-full bg-[#84cc16]" />
-              <span className="font-mono text-[11px] font-bold text-ink">₹ +14% APY</span>
-            </div>
-          </div>
+          <div className="pointer-events-none absolute -top-8 -left-8 h-32 w-32 rounded-full bg-[#84cc16]/15 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-8 -right-8 h-32 w-32 rounded-full bg-[#8B5CF6]/15 blur-3xl" />
         </>
       )}
 
       {/* Main Authentication Card */}
-      <div className="relative z-20 overflow-hidden rounded-3xl border border-line bg-paper-sheet p-6 shadow-ledger sm:p-8">
-        
-        {/* Brand Header & Mode Switcher */}
-        <div className="flex flex-col items-center text-center">
-          <div className="flex items-center gap-1.5">
-            <span className="font-serif text-2xl font-black tracking-tight text-ink">
-              Fin <span className="text-[#84cc16]">Flip</span>
-            </span>
-            <span className="rounded-full border border-[#84cc16]/50 bg-[#84cc16]/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-ink">
-              AI Auth
-            </span>
+      <div className="relative z-20 overflow-hidden rounded-2xl sm:rounded-3xl border border-[#E5DAC4] bg-[#FFFDF8] p-5 sm:p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+        {/* Header */}
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="font-serif text-2xl font-black tracking-tight text-[#18122B]">
+              {mode === "signin" ? "Welcome to FinSage" : "Create your account"}
+            </h2>
+            <p className="mt-0.5 text-xs text-ink-muted">
+              {mode === "signin"
+                ? "Your money workspace starts here."
+                : "Set up your intelligent ledger in seconds."}
+            </p>
           </div>
-
-          <p className="mt-1 text-xs text-ink-muted">
-            {mode === "signin"
-              ? "Sign in to flip the way you manage, track, and grow money"
-              : "Create your personal double-entry ledger and AI wealth co-pilot"}
-          </p>
-
-          {/* Mode Switcher Tabs */}
-          <div className="mt-5 grid w-full grid-cols-2 rounded-full border border-line bg-paper p-1 shadow-inner">
-            <button
-              type="button"
-              onClick={() => {
-                setMode("signin");
-                setError(null);
-                setSuccessMsg(null);
-              }}
-              className={`rounded-full py-1.5 text-xs font-bold transition-all ${
-                mode === "signin"
-                  ? "bg-ink text-paper-sheet shadow-sm"
-                  : "text-ink-muted hover:text-ink"
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMode("signup");
-                setError(null);
-                setSuccessMsg(null);
-              }}
-              className={`rounded-full py-1.5 text-xs font-bold transition-all ${
-                mode === "signup"
-                  ? "bg-ink text-paper-sheet shadow-sm"
-                  : "text-ink-muted hover:text-ink"
-              }`}
-            >
-              Create Account
-            </button>
-          </div>
+          <span className="shrink-0 rounded-full border border-[#84cc16]/60 bg-[#84cc16]/15 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-[#365314]">
+            AI
+          </span>
         </div>
 
-        {/* Demo Credentials Quick-Fill Banner */}
+        {/* Segmented Mode Switcher */}
+        <div className="mt-3.5 grid w-full grid-cols-2 rounded-full border border-line bg-paper p-1">
+          <button
+            type="button"
+            onClick={() => {
+              setMode("signin");
+              setError(null);
+              setSuccessMsg(null);
+            }}
+            className={`rounded-full py-1.5 text-xs font-bold transition-all ${
+              mode === "signin"
+                ? "bg-[#18122B] text-white shadow-sm"
+                : "text-ink-muted hover:text-ink"
+            }`}
+          >
+            Sign In
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("signup");
+              setError(null);
+              setSuccessMsg(null);
+            }}
+            className={`rounded-full py-1.5 text-xs font-bold transition-all ${
+              mode === "signup"
+                ? "bg-[#18122B] text-white shadow-sm"
+                : "text-ink-muted hover:text-ink"
+            }`}
+          >
+            Create Account
+          </button>
+        </div>
+
+        {/* Quick Demo Credentials Row (Sign In Only - Compact) */}
         {mode === "signin" && (
-          <div className="mt-4 flex items-center justify-between rounded-xl border border-dashed border-[#84cc16]/60 bg-[#84cc16]/10 px-3 py-2 text-xs">
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm">⚡</span>
-              <span className="font-medium text-ink">Quick Demo Account</span>
+          <div className="mt-3 flex items-center justify-between rounded-xl border border-dashed border-[#84cc16]/60 bg-[#84cc16]/10 px-3 py-1.5 text-xs">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-xs">⚡</span>
+              <span className="font-semibold text-ink text-[11px] truncate">
+                <span className="text-ink-muted font-normal">Try Demo:</span> demo@finsage.ai
+              </span>
             </div>
             <button
               type="button"
               onClick={handleFillDemo}
-              className="rounded-lg bg-ink px-2.5 py-1 text-[11px] font-bold text-paper-sheet transition-all hover:bg-ink-light active:scale-95"
+              className="shrink-0 rounded-lg bg-[#18122B] px-2 py-1 text-[10px] font-bold text-white transition-all hover:bg-[#2e234e] active:scale-95"
             >
               Auto-fill
             </button>
@@ -250,7 +241,7 @@ export function AuthCard({
 
         {/* Status Alerts */}
         {error && (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-rose/30 bg-rose-tint p-3 text-xs font-medium text-rose animate-in fade-in">
+          <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose/30 bg-rose-tint px-3 py-2 text-xs font-medium text-rose animate-in fade-in">
             <svg className="h-4 w-4 shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
               <path
                 fillRule="evenodd"
@@ -263,7 +254,7 @@ export function AuthCard({
         )}
 
         {successMsg && (
-          <div className="mt-4 flex items-center gap-2 rounded-xl border border-teal/30 bg-teal-tint p-3 text-xs font-medium text-teal animate-in fade-in">
+          <div className="mt-3 flex items-center gap-2 rounded-xl border border-teal/30 bg-teal-tint px-3 py-2 text-xs font-medium text-teal animate-in fade-in">
             <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
               <path
                 fillRule="evenodd"
@@ -276,11 +267,11 @@ export function AuthCard({
         )}
 
         {/* Authentication Form */}
-        <form onSubmit={handleSubmit} className="mt-5 space-y-3.5">
+        <form onSubmit={handleSubmit} className="mt-3 space-y-2.5">
           {/* Name Field (Sign Up Only) */}
           {mode === "signup" && (
             <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-ink-muted">
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-ink-muted">
                 Full Name
               </label>
               <div className="relative mt-1">
@@ -290,7 +281,7 @@ export function AuthCard({
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Radhika Sharma"
-                  className="w-full rounded-xl border border-line bg-paper px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-subtle transition focus:border-ink focus:bg-paper-sheet focus:outline-none focus:ring-2 focus:ring-ink/10"
+                  className="h-10 sm:h-11 w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm text-ink placeholder:text-ink-subtle transition focus:border-[#84cc16] focus:bg-paper-sheet focus:outline-none focus:ring-2 focus:ring-[#84cc16]/20"
                 />
               </div>
             </div>
@@ -298,7 +289,7 @@ export function AuthCard({
 
           {/* Email Field */}
           <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-ink-muted">
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-ink-muted">
               Email Address
             </label>
             <div className="relative mt-1">
@@ -307,8 +298,8 @@ export function AuthCard({
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@example.com"
-                className="w-full rounded-xl border border-line bg-paper px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-subtle transition focus:border-ink focus:bg-paper-sheet focus:outline-none focus:ring-2 focus:ring-ink/10"
+                placeholder="you@example.com"
+                className="h-10 sm:h-11 w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm text-ink placeholder:text-ink-subtle transition focus:border-[#84cc16] focus:bg-paper-sheet focus:outline-none focus:ring-2 focus:ring-[#84cc16]/20"
               />
             </div>
           </div>
@@ -316,7 +307,7 @@ export function AuthCard({
           {/* Password Field */}
           <div>
             <div className="flex items-center justify-between">
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-ink-muted">
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-ink-muted">
                 Password
               </label>
               {mode === "signin" && (
@@ -327,7 +318,7 @@ export function AuthCard({
                     setForgotSent(false);
                     setShowForgotModal(true);
                   }}
-                  className="text-[11px] font-semibold text-[#6366f1] transition hover:underline"
+                  className="text-[11px] font-semibold text-[#8B5CF6] transition hover:underline"
                 >
                   Forgot password?
                 </button>
@@ -339,13 +330,13 @@ export function AuthCard({
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full rounded-xl border border-line bg-paper px-3.5 py-2.5 pr-10 text-sm text-ink placeholder:text-ink-subtle transition focus:border-ink focus:bg-paper-sheet focus:outline-none focus:ring-2 focus:ring-ink/10"
+                placeholder="••••••••••••"
+                className="h-10 sm:h-11 w-full rounded-xl border border-line bg-paper px-3 py-2 pr-10 text-sm text-ink placeholder:text-ink-subtle transition focus:border-[#84cc16] focus:bg-paper-sheet focus:outline-none focus:ring-2 focus:ring-[#84cc16]/20"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-subtle hover:text-ink"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-subtle hover:text-ink p-1"
                 aria-label={showPassword ? "Hide password" : "Show password"}
               >
                 {showPassword ? (
@@ -363,12 +354,12 @@ export function AuthCard({
 
             {/* Password Strength Meter (Sign Up Only) */}
             {mode === "signup" && password.length > 0 && (
-              <div className="mt-2 space-y-1">
+              <div className="mt-1.5 space-y-1">
                 <div className="flex items-center justify-between text-[10px] font-semibold text-ink-muted">
                   <span>Strength: {passStrength.label}</span>
                   <span>{password.length >= 8 ? "✓ Length OK" : "Min 8 chars suggested"}</span>
                 </div>
-                <div className="grid grid-cols-4 gap-1 h-1.5 w-full">
+                <div className="grid grid-cols-4 gap-1 h-1 w-full">
                   {[1, 2, 3, 4].map((step) => (
                     <div
                       key={step}
@@ -385,7 +376,7 @@ export function AuthCard({
           {/* Confirm Password Field (Sign Up Only) */}
           {mode === "signup" && (
             <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-ink-muted">
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-ink-muted">
                 Confirm Password
               </label>
               <div className="relative mt-1">
@@ -394,19 +385,19 @@ export function AuthCard({
                   required
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className={`w-full rounded-xl border px-3.5 py-2.5 pr-10 text-sm text-ink placeholder:text-ink-subtle transition focus:outline-none focus:ring-2 ${
+                  placeholder="••••••••••••"
+                  className={`h-10 sm:h-11 w-full rounded-xl border px-3 py-2 pr-10 text-sm text-ink placeholder:text-ink-subtle transition focus:outline-none focus:ring-2 ${
                     confirmPassword
                       ? passwordsMatch
                         ? "border-teal bg-teal-tint/20 focus:ring-teal/20"
                         : "border-rose bg-rose-tint/20 focus:ring-rose/20"
-                      : "border-line bg-paper focus:border-ink focus:ring-ink/10"
+                      : "border-line bg-paper focus:border-[#84cc16] focus:ring-[#84cc16]/20"
                   }`}
                 />
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-subtle hover:text-ink"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-subtle hover:text-ink p-1"
                   aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                 >
                   {showConfirmPassword ? (
@@ -422,34 +413,34 @@ export function AuthCard({
                 </button>
               </div>
               {confirmPassword && !passwordsMatch && (
-                <p className="mt-1 text-[11px] font-medium text-rose">Passwords do not match</p>
+                <p className="mt-1 text-[10px] font-medium text-rose">Passwords do not match</p>
               )}
             </div>
           )}
 
           {/* Options: Remember Me (Sign In) or Terms Checkbox (Sign Up) */}
           {mode === "signin" ? (
-            <div className="flex items-center justify-between pt-1">
+            <div className="flex items-center justify-between pt-0.5">
               <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-ink-muted select-none">
                 <input
                   type="checkbox"
                   checked={rememberMe}
                   onChange={(e) => setRememberMe(e.target.checked)}
-                  className="h-4 w-4 rounded border-line text-ink accent-ink focus:ring-ink"
+                  className="h-3.5 w-3.5 rounded border-line text-ink accent-[#18122B] focus:ring-0"
                 />
-                <span>Remember me on this device</span>
+                <span className="text-[11px]">Remember me on this device</span>
               </label>
             </div>
           ) : (
-            <div className="pt-1">
+            <div className="pt-0.5">
               <label className="flex cursor-pointer items-start gap-2 text-xs font-medium text-ink-muted select-none">
                 <input
                   type="checkbox"
                   checked={agreeTerms}
                   onChange={(e) => setAgreeTerms(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-line text-ink accent-ink focus:ring-ink"
+                  className="mt-0.5 h-3.5 w-3.5 rounded border-line text-ink accent-[#18122B] focus:ring-0"
                 />
-                <span>
+                <span className="text-[11px]">
                   I agree to the <span className="font-semibold text-ink underline">Terms of Service</span> and{" "}
                   <span className="font-semibold text-ink underline">Privacy Policy</span>.
                 </span>
@@ -461,19 +452,19 @@ export function AuthCard({
           <button
             type="submit"
             disabled={loading}
-            className="group relative mt-2 flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-ink py-3 text-sm font-bold text-paper-sheet shadow-md transition-all duration-200 hover:scale-[1.02] hover:bg-ink-light hover:shadow-lg active:scale-95 disabled:pointer-events-none disabled:opacity-60"
+            className="group relative mt-2 flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-[#84cc16] hover:bg-[#74b810] text-[#18122B] py-2.5 sm:py-3 text-sm font-black shadow-sm transition-all duration-200 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60"
           >
             {loading ? (
               <span className="flex items-center gap-2">
-                <svg className="h-4 w-4 animate-spin text-paper-sheet" viewBox="0 0 24 24" fill="none">
+                <svg className="h-4 w-4 animate-spin text-[#18122B]" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
                 <span>{mode === "signin" ? "Signing In..." : "Creating Account..."}</span>
               </span>
             ) : (
-              <span className="flex items-center gap-2">
-                <span>{mode === "signin" ? "Sign In" : "Create My Account"}</span>
+              <span className="flex items-center gap-1.5">
+                <span>{mode === "signin" ? "Sign In" : "Create Account"}</span>
                 <svg
                   className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1"
                   fill="none"
@@ -485,12 +476,11 @@ export function AuthCard({
                 </svg>
               </span>
             )}
-            <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-[#84cc16]/20 via-[#6366f1]/20 to-transparent transition-transform duration-500 group-hover:translate-x-full" />
           </button>
         </form>
 
-        {/* Alternate Navigation Switcher */}
-        <div className="mt-6 border-t border-line pt-4 text-center">
+        {/* Alternate Navigation Switcher & Trust Microcopy */}
+        <div className="mt-3.5 pt-3 border-t border-line/70 text-center space-y-1.5">
           {mode === "signin" ? (
             <p className="text-xs text-ink-muted">
               Don&apos;t have an account yet?{" "}
@@ -501,7 +491,7 @@ export function AuthCard({
                   setError(null);
                   setSuccessMsg(null);
                 }}
-                className="font-bold text-[#84cc16] hover:underline"
+                className="font-bold text-[#18122B] hover:text-[#84cc16] transition hover:underline"
               >
                 Sign up for free
               </button>
@@ -516,19 +506,22 @@ export function AuthCard({
                   setError(null);
                   setSuccessMsg(null);
                 }}
-                className="font-bold text-ink hover:underline"
+                className="font-bold text-[#18122B] hover:text-[#84cc16] transition hover:underline"
               >
                 Sign in here
               </button>
             </p>
           )}
+          <p className="text-[10px] text-ink-subtle">
+            🔒 Private by design • Your financial data stays yours
+          </p>
         </div>
       </div>
 
       {/* Forgot Password Modal */}
       {showForgotModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4 backdrop-blur-sm animate-in fade-in">
-          <div className="relative w-full max-w-sm rounded-3xl border border-line bg-paper-sheet p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#18122B]/60 p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="relative w-full max-w-sm rounded-3xl border border-[#E5DAC4] bg-[#FFFDF8] p-6 shadow-2xl">
             <button
               onClick={() => setShowForgotModal(false)}
               className="absolute right-4 top-4 rounded-full border border-line bg-paper p-1 text-ink-muted hover:text-ink"
@@ -544,12 +537,12 @@ export function AuthCard({
             </button>
 
             <div className="text-center">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#6366f1]/10 text-[#6366f1] text-xl">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#8B5CF6]/10 text-[#8B5CF6] text-xl">
                 🔑
               </div>
-              <h3 className="mt-3 font-serif text-lg font-bold text-ink">Reset Password</h3>
+              <h3 className="mt-3 font-serif text-lg font-bold text-[#18122B]">Reset Password</h3>
               <p className="mt-1 text-xs text-ink-muted">
-                Enter your registered email address and we&apos;ll send you a password reset simulation link.
+                Enter your registered email address to receive password reset instructions.
               </p>
             </div>
 
@@ -576,11 +569,11 @@ export function AuthCard({
                   value={forgotEmail}
                   onChange={(e) => setForgotEmail(e.target.value)}
                   placeholder="name@example.com"
-                  className="w-full rounded-xl border border-line bg-paper px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-subtle transition focus:border-ink focus:outline-none focus:ring-2 focus:ring-ink/10"
+                  className="h-10 w-full rounded-xl border border-line bg-paper px-3.5 py-2 text-sm text-ink placeholder:text-ink-subtle transition focus:border-[#84cc16] focus:outline-none focus:ring-2 focus:ring-[#84cc16]/20"
                 />
                 <button
                   type="submit"
-                  className="w-full rounded-xl bg-ink py-2.5 text-xs font-bold text-paper-sheet shadow transition hover:bg-ink-light active:scale-95"
+                  className="w-full rounded-xl bg-[#18122B] py-2.5 text-xs font-bold text-white shadow transition hover:bg-[#2d234d] active:scale-95"
                 >
                   Send Reset Link
                 </button>

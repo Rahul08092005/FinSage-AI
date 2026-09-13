@@ -26,21 +26,28 @@ export async function register(req: Request, res: Response) {
   }
   const { name, email, password } = parsed.data;
 
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    return res.status(409).json({ error: "An account with this email already exists" });
+  try {
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      return res.status(409).json({ error: "An account with this email already exists" });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await prisma.user.create({
+      data: { name, email, password: passwordHash },
+    });
+
+    const token = signToken(user.id);
+    return res.status(201).json({
+      token,
+      user: { id: user.id, name: user.name, email: user.email },
+    });
+  } catch (err: any) {
+    console.error("[auth:register] Database error:", err.message);
+    return res.status(503).json({
+      error: "Database server is offline or unreachable. Please start Docker (finsage-postgres) and retry.",
+    });
   }
-
-  const passwordHash = await bcrypt.hash(password, 10);
-  const user = await prisma.user.create({
-    data: { name, email, password: passwordHash },
-  });
-
-  const token = signToken(user.id);
-  return res.status(201).json({
-    token,
-    user: { id: user.id, name: user.name, email: user.email },
-  });
 }
 
 export async function login(req: Request, res: Response) {
@@ -50,19 +57,26 @@ export async function login(req: Request, res: Response) {
   }
   const { email, password } = parsed.data;
 
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) {
-    return res.status(401).json({ error: "Invalid email or password" });
-  }
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
 
-  const valid = await bcrypt.compare(password, user.password);
-  if (!valid) {
-    return res.status(401).json({ error: "Invalid email or password" });
-  }
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
 
-  const token = signToken(user.id);
-  return res.json({
-    token,
-    user: { id: user.id, name: user.name, email: user.email },
-  });
+    const token = signToken(user.id);
+    return res.json({
+      token,
+      user: { id: user.id, name: user.name, email: user.email },
+    });
+  } catch (err: any) {
+    console.error("[auth:login] Database error:", err.message);
+    return res.status(503).json({
+      error: "Database server is offline or unreachable. Please start Docker (finsage-postgres) and retry.",
+    });
+  }
 }

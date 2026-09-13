@@ -101,7 +101,7 @@ export function Navbar() {
                 href="/signup"
                 className="rounded-full bg-[#84cc16] px-4 py-1.5 text-xs font-black text-[#18122B] shadow-sm transition hover:bg-[#a3e635] hover:scale-105 active:scale-95"
               >
-                Start Flipping
+                Get Started
               </Link>
 
               {/* Mobile Menu Toggle */}
