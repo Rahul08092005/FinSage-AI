@@ -5,10 +5,7 @@ import { TransactionsTable } from "@/components/TransactionsTable";
 
 export default function TransactionsPage() {
   return (
-    <AppShell
-      title="Account Transactions"
-      subtitle="Live double-entry journal and voucher records — Phase 2 Core."
-    >
+    <AppShell hideHeader={true}>
       {(token) => <TransactionsTable token={token} />}
     </AppShell>
   );

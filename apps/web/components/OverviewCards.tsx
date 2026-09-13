@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { AuthGate } from "@/components/AuthGate";
 import { DominantBalanceHero } from "@/components/DominantBalanceHero";
-import { AiCompanionBar } from "@/components/AiCompanionBar";
 import { SpendingCharts } from "@/components/SpendingCharts";
 import { getExpenseSummary, getHealthScore, getMe, getSpendingTrend } from "@/lib/api";
 
@@ -66,10 +65,7 @@ function AuthenticatedOverviewCards({ token }: { token: string }) {
         onSalaryUpdated={(newSalary) => setSalary(newSalary)}
       />
 
-      {/* 2. Compact AI Robot Companion Bar */}
-      <AiCompanionBar />
-
-      {/* 3. Main Analytics: Top 5 Category Breakdown & Spending Rhythm */}
+      {/* 2. Main Analytics: Top 5 Category Breakdown & Spending Rhythm */}
       <SpendingCharts categoryData={categories} trendData={trend} loading={loading} />
     </div>
   );

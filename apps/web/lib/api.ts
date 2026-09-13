@@ -44,8 +44,8 @@ export async function loginUser(data: { email: string; password: string }) {
   return json;
 }
 
-export async function getTransactions(token: string) {
-  const res = await fetch(`${BFF_URL}/api/v1/transactions`, {
+export async function getTransactions(token: string, limit = 100) {
+  const res = await fetch(`${BFF_URL}/api/v1/transactions?limit=${limit}`, {
     headers: authHeaders(token),
     cache: "no-store",
   });
@@ -119,6 +119,20 @@ export async function deleteTransaction(token: string, id: string) {
     headers: authHeaders(token),
   });
   if (!res.ok) throw new Error("Failed to delete transaction");
+}
+
+export async function updateTransaction(
+  token: string,
+  id: string,
+  data: Partial<{ amount: number; category: string; transactionDate: string; description: string }>
+) {
+  const res = await fetch(`${BFF_URL}/api/v1/transactions/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update transaction");
+  return res.json();
 }
 
 export async function deleteBudget(token: string, id: string) {

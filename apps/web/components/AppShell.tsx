@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { Navbar } from "./Navbar";
 import { useToken } from "./AuthGate";
+import { GlobalFloatingAssistant } from "./GlobalFloatingAssistant";
 
 interface AppShellProps {
   children: React.ReactNode | ((token: string) => React.ReactNode);
@@ -69,6 +70,9 @@ export function AppShell({ children, title, subtitle, actions, hideHeader = fals
           {typeof children === "function" ? children(token) : children}
         </div>
       </main>
+
+      {/* Global Floating FinSage AI Assistant */}
+      <GlobalFloatingAssistant token={token} />
     </div>
   );
 }
