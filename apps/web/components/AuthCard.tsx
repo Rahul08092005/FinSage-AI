@@ -141,7 +141,7 @@ export function AuthCard({
     } catch (err: any) {
       if (err.message === "Failed to fetch" || err.message?.includes("fetch")) {
         setError(
-          "Cannot connect to the FinSage BFF backend (http://localhost:4000). Please ensure the backend server and Docker are running."
+          "Cannot connect to the FinSage BFF backend. Please ensure the backend service is running and accessible."
         );
       } else {
         setError(err.message || "Authentication failed. Please check your credentials.");

@@ -6,8 +6,9 @@ import { AdvisorChat } from "@/components/AdvisorChat";
 export default function AdvisorPage() {
   return (
     <AppShell
-      title="AI Wealth Advisory Desk"
-      subtitle="Live intelligence stream analyzing transaction histories, budget ceilings, and archival goals."
+      title="AI Advisor"
+      subtitle="Your personal money copilot."
+      hideHeader={true}
     >
       {(token) => <AdvisorChat token={token} />}
     </AppShell>

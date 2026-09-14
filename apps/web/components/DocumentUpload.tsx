@@ -140,8 +140,17 @@ export function DocumentUpload({ token }: { token: string }) {
   // Polling logic for uploaded document
   function startPolling(id: string) {
     stopPolling();
+    const pollStart = Date.now();
     pollIntervalRef.current = setInterval(async () => {
       try {
+        // Guard against infinite polling (>30s)
+        if (Date.now() - pollStart > 30000) {
+          stopPolling();
+          setUploadError("Document processing is taking longer than expected. FinSage is working on it in the background — feel free to refresh shortly.");
+          loadDocuments();
+          return;
+        }
+
         const doc = await getDocumentStatus(token, id);
         setCurrentDoc(doc);
 
@@ -745,6 +754,34 @@ export function DocumentUpload({ token }: { token: string }) {
 
             {/* Extracted Transactions Editor / Auditor */}
             <div className="mt-4">
+              {inspectDoc.status === "NEEDS_REVIEW" && (
+                <div className="mb-3 rounded-xl bg-amber-50 border border-amber-200 p-3 flex items-start gap-2.5">
+                  <span className="text-base leading-none">👀</span>
+                  <div>
+                    <p className="text-xs font-bold text-amber-900">
+                      Review Required Before Recording
+                    </p>
+                    <p className="text-[11px] text-amber-800/90 mt-0.5">
+                      FinSage couldn’t confidently read all receipt figures. Review and correct the highlighted fields below before committing to your ledger.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {inspectDoc.status === "FAILED" && (
+                <div className="mb-3 rounded-xl bg-rose-50 border border-rose-200 p-3 flex items-start gap-2.5">
+                  <span className="text-base leading-none">✕</span>
+                  <div>
+                    <p className="text-xs font-bold text-rose-900">
+                      OCR Parsing Incomplete
+                    </p>
+                    <p className="text-[11px] text-rose-800/90 mt-0.5">
+                      FinSage couldn’t parse this document. The image might be blurry, cropped, or in an unsupported format. You can re-upload a clearer image or manually record transactions.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between mb-2">
                 <div>
                   <h4 className="font-serif text-sm font-bold text-[#18122B]">
@@ -783,87 +820,104 @@ export function DocumentUpload({ token }: { token: string }) {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-100">
-                      {reviewRows.map((row, idx) => (
-                        <tr key={idx} className="hover:bg-stone-50/50 transition">
-                          <td className="py-2 px-3">
-                            {inspectDoc.status === "NEEDS_REVIEW" ? (
-                              <input
-                                type="date"
-                                className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs text-[#18122B] focus:border-[#18122B] focus:outline-none"
-                                value={row.transactionDate}
-                                onChange={(e) => handleRowChange(idx, "transactionDate", e.target.value)}
-                              />
-                            ) : (
-                              <span className="font-mono text-stone-600">{row.transactionDate}</span>
-                            )}
-                          </td>
-                          <td className="py-2 px-3">
-                            {inspectDoc.status === "NEEDS_REVIEW" ? (
-                              <input
-                                type="text"
-                                placeholder="Description"
-                                className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs text-[#18122B] focus:border-[#18122B] focus:outline-none"
-                                value={row.description}
-                                onChange={(e) => handleRowChange(idx, "description", e.target.value)}
-                              />
-                            ) : (
-                              <span className="font-medium text-[#18122B]">{row.description}</span>
-                            )}
-                          </td>
-                          <td className="py-2 px-3">
-                            {inspectDoc.status === "NEEDS_REVIEW" ? (
-                              <select
-                                className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-[#18122B] focus:border-[#18122B] focus:outline-none"
-                                value={row.category}
-                                onChange={(e) => handleRowChange(idx, "category", e.target.value)}
-                              >
-                                {CATEGORIES.map((c) => (
-                                  <option key={c} value={c}>
-                                    {c}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <span className="inline-block rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600 uppercase">
-                                {row.category}
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-2 px-3 text-right">
-                            {inspectDoc.status === "NEEDS_REVIEW" ? (
-                              <div className="relative inline-block w-28">
-                                <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2 font-serif text-xs font-bold text-stone-400">
-                                  ₹
-                                </span>
+                      {reviewRows.map((row, idx) => {
+                        const isUnreadable = row.amount === "" || isNaN(Number(row.amount)) || Number(row.amount) <= 0;
+                        return (
+                          <tr key={idx} className="hover:bg-stone-50/50 transition">
+                            <td className="py-2 px-3">
+                              {inspectDoc.status === "NEEDS_REVIEW" ? (
                                 <input
-                                  type="number"
-                                  step="0.01"
-                                  className="w-full rounded-lg border border-stone-200 bg-white py-1 pl-5 pr-2 text-right font-serif text-xs font-bold tabular-nums text-[#18122B] focus:border-[#18122B] focus:outline-none"
-                                  value={row.amount}
-                                  onChange={(e) => handleRowChange(idx, "amount", e.target.value)}
+                                  type="date"
+                                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs text-[#18122B] focus:border-[#18122B] focus:outline-none"
+                                  value={row.transactionDate}
+                                  onChange={(e) => handleRowChange(idx, "transactionDate", e.target.value)}
                                 />
-                              </div>
-                            ) : (
-                              <span className="font-serif font-bold text-[#18122B] tabular-nums">
-                                ₹ {Number(row.amount).toLocaleString("en-IN")}
-                              </span>
-                            )}
-                          </td>
-                          {inspectDoc.status === "NEEDS_REVIEW" && (
-                            <td className="py-2 px-2 text-center">
-                              {reviewRows.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveRow(idx)}
-                                  className="rounded p-1 text-stone-400 hover:text-rose-600 hover:bg-rose-50 transition"
-                                >
-                                  ✕
-                                </button>
+                              ) : (
+                                <span className="font-mono text-stone-600">{row.transactionDate}</span>
                               )}
                             </td>
-                          )}
-                        </tr>
-                      ))}
+                            <td className="py-2 px-3">
+                              {inspectDoc.status === "NEEDS_REVIEW" ? (
+                                <input
+                                  type="text"
+                                  placeholder="Description"
+                                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs text-[#18122B] focus:border-[#18122B] focus:outline-none"
+                                  value={row.description}
+                                  onChange={(e) => handleRowChange(idx, "description", e.target.value)}
+                                />
+                              ) : (
+                                <span className="font-medium text-[#18122B]">{row.description}</span>
+                              )}
+                            </td>
+                            <td className="py-2 px-3">
+                              {inspectDoc.status === "NEEDS_REVIEW" ? (
+                                <select
+                                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-[#18122B] focus:border-[#18122B] focus:outline-none"
+                                  value={row.category}
+                                  onChange={(e) => handleRowChange(idx, "category", e.target.value)}
+                                >
+                                  {CATEGORIES.map((c) => (
+                                    <option key={c} value={c}>
+                                      {c}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span className="inline-block rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600 uppercase">
+                                  {row.category}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              {inspectDoc.status === "NEEDS_REVIEW" ? (
+                                <div className="flex flex-col items-end">
+                                  <div className="relative inline-block w-28">
+                                    <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2 font-serif text-xs font-bold text-stone-400">
+                                      ₹
+                                    </span>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      placeholder="0.00"
+                                      className={`w-full rounded-lg border bg-white py-1 pl-5 pr-2 text-right font-serif text-xs font-bold tabular-nums text-[#18122B] focus:border-[#18122B] focus:outline-none ${
+                                        isUnreadable ? "border-amber-300 ring-1 ring-amber-200" : "border-stone-200"
+                                      }`}
+                                      value={row.amount}
+                                      onChange={(e) => handleRowChange(idx, "amount", e.target.value)}
+                                    />
+                                  </div>
+                                  {isUnreadable && (
+                                    <span className="text-[9px] font-bold text-amber-700 uppercase tracking-tight mt-0.5">
+                                      Unreadable in scan
+                                    </span>
+                                  )}
+                                </div>
+                              ) : isUnreadable ? (
+                                <span className="text-[11px] font-semibold text-amber-700 italic">
+                                  Amount unreadable — review required
+                                </span>
+                              ) : (
+                                <span className="font-serif font-bold text-[#18122B] tabular-nums">
+                                  ₹ {Number(row.amount).toLocaleString("en-IN")}
+                                </span>
+                              )}
+                            </td>
+                            {inspectDoc.status === "NEEDS_REVIEW" && (
+                              <td className="py-2 px-2 text-center">
+                                {reviewRows.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveRow(idx)}
+                                    className="rounded p-1 text-stone-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                                  >
+                                    ✕
+                                  </button>
+                                )}
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

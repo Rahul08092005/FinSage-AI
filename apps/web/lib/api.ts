@@ -1,6 +1,10 @@
 // Person 4 owns this file. Every call to the BFF goes through here so the
 // base URL only exists in one place. Phase 2 adds transactions/budgets/goals.
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || "http://localhost:4000";
+export const BFF_URL =
+  process.env.NEXT_PUBLIC_BFF_URL ||
+  (typeof window !== "undefined" && !window.location.hostname.includes("localhost")
+    ? window.location.origin
+    : "http://localhost:4000");
 
 function authHeaders(token?: string): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -285,9 +289,27 @@ export async function streamAdvisorChat(
       }
     }
     onDone();
-  } catch (err) {
-    onError(err);
+  } catch (err: any) {
+    const message =
+      err?.name === "AbortError"
+        ? "Advisor stream was cancelled."
+        : err?.message?.includes("Failed to fetch")
+        ? "Cannot reach the FinSage intelligence service. Please check your network or server connectivity."
+        : err?.message || "Failed to reach AI Advisor. Please try again.";
+    onError(new Error(message));
   }
+}
+
+export async function exportFinancialReport(token: string): Promise<string> {
+  const res = await fetch(`${BFF_URL}/api/v1/reports/export`, {
+    headers: authHeaders(token),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({ error: "Report export service currently unavailable" }));
+    throw new Error(errData.error || `Report export failed (${res.status})`);
+  }
+  return res.text();
 }
 
 export async function getExpenseSummary(token: string, monthStr?: string) {
