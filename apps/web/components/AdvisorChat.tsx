@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { streamAdvisorChat, exportFinancialReport } from "@/lib/api";
 import { AdvisorResponseView } from "./AdvisorResponseView";
+import { CitationSourceControl } from "./CitationSourceControl";
 
 interface Message {
   id: string;
@@ -10,6 +11,7 @@ interface Message {
   content: string;
   timestamp: string;
   mode?: "advisor" | "compare";
+  citations?: any[];
 }
 
 const ADVISOR_PROMPTS = [
@@ -99,6 +101,15 @@ export function AdvisorChat({ token }: { token: string }) {
         console.error("[streamAdvisorChat] Error:", err);
         setError(err.message || "Failed to reach AI Advisor. Please verify the AI service is running.");
         setIsStreaming(false);
+      },
+      (citations) => {
+        if (Array.isArray(citations) && citations.length > 0) {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === advisorMsgId ? { ...msg, citations } : msg
+            )
+          );
+        }
       }
     );
   }
@@ -137,7 +148,16 @@ export function AdvisorChat({ token }: { token: string }) {
           if (m.role === "user") {
             sessionContent += `### Inquirer Query (${m.timestamp}):\n> ${m.content}\n\n`;
           } else {
-            sessionContent += `### Advisor Memorandum (${m.timestamp}) [Mode: ${m.mode ?? "advisor"}]:\n${m.content}\n\n---\n\n`;
+            sessionContent += `### Advisor Memorandum (${m.timestamp}) [Mode: ${m.mode ?? "advisor"}]:\n${m.content}\n\n`;
+            if (m.citations && m.citations.length > 0) {
+              sessionContent += `**Grounded Sources (${m.citations.length}):**\n`;
+              m.citations.forEach((c: any, cIdx: number) => {
+                const text = typeof c === "string" ? c : (c.title ? `${c.title}: ${c.content || c.snippet || ""}` : (c.content || c.snippet || JSON.stringify(c)));
+                sessionContent += `- [Source ${cIdx + 1}] ${text.slice(0, 160)}...\n`;
+              });
+              sessionContent += `\n`;
+            }
+            sessionContent += `---\n\n`;
           }
         });
       } else {
@@ -354,6 +374,9 @@ export function AdvisorChat({ token }: { token: string }) {
                       isStreaming={isStreaming && msg.id === messages[messages.length - 1]?.id}
                       mode={msg.mode || mode}
                     />
+
+                    {/* Grounded Evidence / Citation Source Control */}
+                    <CitationSourceControl citations={msg.citations} />
                   </div>
                 ) : (
                   <p className="whitespace-pre-wrap">{msg.content}</p>

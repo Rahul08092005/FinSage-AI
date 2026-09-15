@@ -246,7 +246,8 @@ export async function streamAdvisorChat(
   message: string,
   onChunk: (chunk: string) => void,
   onDone: () => void,
-  onError: (err: any) => void
+  onError: (err: any) => void,
+  onCitations?: (citations: any[]) => void
 ) {
   try {
     const res = await fetch(`${BFF_URL}/api/v1/advisor/chat`, {
@@ -258,6 +259,20 @@ export async function streamAdvisorChat(
     if (!res.ok) {
       const errData = await res.json().catch(() => ({ error: "Failed to communicate with advisor" }));
       throw new Error(errData.error?.formErrors?.join(", ") || errData.error || `Advisor request failed (${res.status})`);
+    }
+
+    const contentType = res.headers.get("content-type") || "";
+    // If server responds with direct JSON (non-streamed)
+    if (contentType.includes("application/json")) {
+      const data = await res.json();
+      if (data.answer || data.response || data.text) {
+        onChunk(String(data.answer || data.response || data.text));
+      }
+      if (Array.isArray(data.citations) && data.citations.length > 0) {
+        onCitations?.(data.citations);
+      }
+      onDone();
+      return;
     }
 
     if (!res.body) {
@@ -285,6 +300,39 @@ export async function streamAdvisorChat(
           onDone();
           return;
         }
+
+        // Check for citations payload
+        if (payload.startsWith("[CITATIONS]")) {
+          try {
+            const raw = payload.slice(11).trim();
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              onCitations?.(parsed);
+            }
+          } catch (e) {
+            console.warn("[streamAdvisorChat] Failed to parse citations:", e);
+          }
+          continue;
+        }
+
+        // Check for JSON object chunk with citations
+        if (payload.trim().startsWith("{") && payload.trim().endsWith("}")) {
+          try {
+            const parsed = JSON.parse(payload.trim());
+            if (Array.isArray(parsed.citations) && parsed.citations.length > 0) {
+              onCitations?.(parsed.citations);
+            }
+            if (parsed.token) {
+              onChunk(parsed.token);
+              continue;
+            }
+            if (parsed.answer) {
+              onChunk(parsed.answer);
+              continue;
+            }
+          } catch {}
+        }
+
         onChunk(payload);
       }
     }

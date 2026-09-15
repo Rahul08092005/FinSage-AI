@@ -1,14 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
-
-export interface CitationItem {
-  id: string;
-  label: string;
-  category: "transaction" | "budget" | "goal" | "document" | "general";
-  excerpt: string;
-  detail: string;
-}
+import React, { useMemo } from "react";
 
 export interface GuruPerspective {
   title: string;
@@ -16,7 +8,6 @@ export interface GuruPerspective {
   style: "safe" | "growth" | "balanced";
   recommendation: string;
   content: string;
-  citations: CitationItem[];
 }
 
 interface AdvisorResponseViewProps {
@@ -25,53 +16,7 @@ interface AdvisorResponseViewProps {
   mode?: "advisor" | "compare";
 }
 
-// Helper to intelligently detect RAG references from grounded response text
-function extractCitationsFromText(text: string): CitationItem[] {
-  const citations: CitationItem[] = [];
-  const lower = text.toLowerCase();
 
-  if (lower.includes("transaction") || lower.includes("spent") || lower.includes("expense") || lower.includes("ledger")) {
-    citations.push({
-      id: "cite-tx",
-      label: "Transactions · Sep 2026",
-      category: "transaction",
-      excerpt: "Grounded in recent transactions and spending records.",
-      detail: "Verified against current billing cycle ledger ledger entries.",
-    });
-  }
-
-  if (lower.includes("budget") || lower.includes("limit") || lower.includes("ceiling") || lower.includes("allocated")) {
-    citations.push({
-      id: "cite-budget",
-      label: "Budget Allocations",
-      category: "budget",
-      excerpt: "Referenced monthly category spending limits and target allowances.",
-      detail: "Grounding data from active category budget caps.",
-    });
-  }
-
-  if (lower.includes("goal") || lower.includes("mission") || lower.includes("target date") || lower.includes("savings")) {
-    citations.push({
-      id: "cite-goal",
-      label: "Money Missions",
-      category: "goal",
-      excerpt: "Evaluated against target maturity dates and milestones.",
-      detail: "Grounding data from established savings targets.",
-    });
-  }
-
-  if (lower.includes("document") || lower.includes("receipt") || lower.includes("statement") || lower.includes("ocr")) {
-    citations.push({
-      id: "cite-doc",
-      label: "FinSage Vault",
-      category: "document",
-      excerpt: "Referenced OCR-extracted receipts and bank statement vouchers.",
-      detail: "Verified against audited documents in Vault.",
-    });
-  }
-
-  return citations;
-}
 
 // Parse multiple perspectives if text contains markdown headers, or return single block
 function parsePerspectives(text: string): GuruPerspective[] | null {
@@ -138,22 +83,15 @@ function buildPerspective(rawTitle: string, rawContent: string): GuruPerspective
     style,
     recommendation,
     content,
-    citations: extractCitationsFromText(rawContent),
   };
 }
 
 export function AdvisorResponseView({ content, isStreaming = false, mode = "advisor" }: AdvisorResponseViewProps) {
-  const [activeCitation, setActiveCitation] = useState<CitationItem | null>(null);
-
   // Auto-detect multi-perspective vs single answer
   const multiPerspectives = useMemo(() => {
     if (isStreaming || !content) return null;
     return parsePerspectives(content);
   }, [content, isStreaming]);
-
-  const citations = useMemo(() => {
-    return extractCitationsFromText(content);
-  }, [content]);
 
   // Style configurations for perspective cards
   const styleConfig = {
@@ -222,25 +160,6 @@ export function AdvisorResponseView({ content, isStreaming = false, mode = "advi
                       </p>
                     )}
                   </div>
-
-                  {/* Supporting RAG chips inside card */}
-                  {p.citations.length > 0 && (
-                    <div className="mt-3 pt-2.5 border-t border-stone-200/60 flex flex-wrap items-center gap-1.5">
-                      <span className="text-[9px] font-bold uppercase text-stone-400">
-                        Sources:
-                      </span>
-                      {p.citations.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => setActiveCitation(c)}
-                          className="rounded-full bg-stone-100 hover:bg-stone-200 px-2 py-0.5 text-[10px] font-medium text-stone-700 transition cursor-pointer"
-                        >
-                          {c.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -263,73 +182,6 @@ export function AdvisorResponseView({ content, isStreaming = false, mode = "advi
               <span className="ml-1 inline-block h-3.5 w-1 animate-pulse bg-lime-500 align-middle rounded-xs" />
             )}
           </div>
-        </div>
-      )}
-
-      {/* 3. SURFACE RAG CITATION CHIPS BENEATH RESPONSE */}
-      {!isStreaming && citations.length > 0 && (
-        <div className="pt-2 border-t border-stone-200/60 mt-2">
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-[9px] font-bold uppercase tracking-wider text-stone-400">
-              ✦ GROUNDED IN YOUR DATA
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5">
-            {citations.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => setActiveCitation(activeCitation?.id === c.id ? null : c)}
-                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition cursor-pointer ${
-                  activeCitation?.id === c.id
-                    ? "border-[#18122B] bg-[#18122B] text-white shadow-xs"
-                    : "border-stone-200/80 bg-white hover:border-lime-500 hover:bg-lime-50/40 text-stone-700"
-                }`}
-              >
-                <span>
-                  {c.category === "transaction"
-                    ? "💳"
-                    : c.category === "budget"
-                    ? "📊"
-                    : c.category === "goal"
-                    ? "🎯"
-                    : "🧾"}
-                </span>
-                <span>{c.label}</span>
-                <span className="text-[9px] opacity-60">↗</span>
-              </button>
-            ))}
-          </div>
-
-          {/* RAG Source Detail Popover */}
-          {activeCitation && (
-            <div className="mt-2.5 rounded-xl border border-stone-200 bg-white p-3 shadow-md animate-in fade-in max-w-md">
-              <div className="flex items-center justify-between border-b border-stone-100 pb-1.5 mb-1.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold uppercase tracking-wider text-stone-700">
-                    {activeCitation.label}
-                  </span>
-                  <span className="text-[9px] font-bold uppercase text-lime-700 bg-lime-100 px-1.5 py-0.2 rounded">
-                    Verified
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveCitation(null)}
-                  className="text-stone-400 hover:text-stone-700 text-xs p-0.5"
-                >
-                  ✕
-                </button>
-              </div>
-              <p className="text-[11px] text-stone-600 leading-snug">
-                {activeCitation.excerpt}
-              </p>
-              <p className="mt-1 text-[10px] text-stone-400 italic">
-                {activeCitation.detail}
-              </p>
-            </div>
-          )}
         </div>
       )}
     </div>

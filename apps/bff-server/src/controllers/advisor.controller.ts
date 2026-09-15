@@ -68,6 +68,9 @@ export async function advisorChat(req: AuthedRequest, res: Response) {
 
   function sendNext() {
     if (index >= words.length) {
+      if (body.citations && Array.isArray(body.citations) && body.citations.length > 0) {
+        res.write(`data: [CITATIONS] ${JSON.stringify(body.citations)}\n\n`);
+      }
       res.write("data: [DONE]\n\n");
       res.end();
       return;
