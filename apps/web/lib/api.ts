@@ -348,16 +348,46 @@ export async function streamAdvisorChat(
   }
 }
 
-export async function exportFinancialReport(token: string): Promise<string> {
+export interface ExportReportResult {
+  markdown: string;
+  filename: string;
+}
+
+export async function exportReport(token: string): Promise<ExportReportResult> {
   const res = await fetch(`${BFF_URL}/api/v1/reports/export`, {
     headers: authHeaders(token),
     cache: "no-store",
   });
+
   if (!res.ok) {
-    const errData = await res.json().catch(() => ({ error: "Report export service currently unavailable" }));
-    throw new Error(errData.error || `Report export failed (${res.status})`);
+    let errorMsg = `Report export failed (${res.status})`;
+    try {
+      const errData = await res.json();
+      errorMsg = errData.error || errorMsg;
+    } catch {
+      const text = await res.text().catch(() => "");
+      if (text) errorMsg = text.slice(0, 120);
+    }
+    throw new Error(errorMsg);
   }
-  return res.text();
+
+  // Detect filename from Content-Disposition header if provided by backend
+  const disposition = res.headers.get("content-disposition");
+  let filename = "FinSage-Financial-Report.md";
+  if (disposition) {
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    if (match && match[1]) {
+      filename = match[1].trim();
+    }
+  }
+
+  const markdown = await res.text();
+  return { markdown, filename };
+}
+
+export async function exportFinancialReport(token: string): Promise<string> {
+  const res = await exportReport(token);
+  return res.markdown;
 }
 
 export async function getExpenseSummary(token: string, monthStr?: string) {
