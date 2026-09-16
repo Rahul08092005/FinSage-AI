@@ -2,7 +2,6 @@
 import { Suspense, useEffect, useState } from "react";
 import { AuthCard } from "@/components/AuthCard";
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || "http://localhost:4000";
 
 export function useToken() {
   const [token, setToken] = useState<string | null>(null);

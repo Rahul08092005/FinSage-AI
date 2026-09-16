@@ -1,10 +1,6 @@
 // Person 4 owns this file. Every call to the BFF goes through here so the
 // base URL only exists in one place. Phase 2 adds transactions/budgets/goals.
-export const BFF_URL =
-  process.env.NEXT_PUBLIC_BFF_URL ||
-  (typeof window !== "undefined" && !window.location.hostname.includes("localhost")
-    ? window.location.origin
-    : "http://localhost:4000");
+export const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || "";
 
 function authHeaders(token?: string): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
