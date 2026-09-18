@@ -8,11 +8,13 @@ from app.agents.rag_advisor_agent import RAGAdvisorAgent
 from app.tools.budgeting_tools import get_budget_recommendation
 from app.tools.goal_tools import track_goal_progress
 from app.tools.analytics_tools import get_spending_summary
+from app.tools.tax_advice_tools import get_tax_savings_advice
 from app.services.llm_client import generate
 
 SPENDING_KEYWORDS = ["spent", "spending", "total", "expense", "transaction", "purchased", "cost", "spend"]
 ANALYTICS_KEYWORDS = ["breakdown", "analytics", "distribution", "category split", "pie"]
-FINANCE_KNOWLEDGE_KEYWORDS = ["what is", "explain", "ppf", "tax", "invest", "elss", "itr", "80c", "deduction", "sip", "mutual fund"]
+TAX_KEYWORDS = ["tax", "ppf", "elss", "sip", "80c", "save on taxes"]
+FINANCE_KNOWLEDGE_KEYWORDS = ["what is", "explain", "invest", "itr", "deduction", "mutual fund"]
 BUDGET_KEYWORDS = ["budget", "recommend", "how much should i spend", "limit", "target spend"]
 GOAL_KEYWORDS = ["goal", "saving for", "progress", "target date", "save"]
 
@@ -29,6 +31,35 @@ class SupervisorAgent(BaseAgent):
         if state.get("document_id"):
             agent = DocumentAgent()
             return agent.run(state)
+
+        # Branch 2: Tax & SIP advice
+        if any(kw in msg_lower for kw in TAX_KEYWORDS):
+            import re
+            income = float(state.get("income") or state.get("total_income") or 1000000.0)
+            current_80c = float(state.get("current_80c_investments") or state.get("investments") or 0.0)
+
+            inc_match = re.search(r'(?:income|salary|earning)(?:\s+is|\s+of)?\s*(?:rs\.?|inr|₹)?\s*(\d[\d,]*)', msg_lower)
+            if inc_match:
+                try:
+                    income = float(inc_match.group(1).replace(",", ""))
+                except Exception:
+                    pass
+
+            inv_match = re.search(r'(?:invested|investment|80c|ppf|elss)(?:\s+is|\s+of)?\s*(?:rs\.?|inr|₹)?\s*(\d[\d,]*)', msg_lower)
+            if inv_match:
+                try:
+                    current_80c = float(inv_match.group(1).replace(",", ""))
+                except Exception:
+                    pass
+
+            tool_name = getattr(get_tax_savings_advice, "name", "get_tax_savings_advice")
+            rec = get_tax_savings_advice.invoke({"income": income, "current_80c_investments": current_80c})
+
+            state["answer"] = rec.get("explanation", "")
+            state["agent_path"].append(tool_name)
+            state["citations"] = rec.get("citations", [])
+            state["metrics"] = rec.get("raw_numbers", {})
+            return state
 
         # Branch 2: Budgeting recommendation
         if any(kw in msg_lower for kw in BUDGET_KEYWORDS):
@@ -90,7 +121,10 @@ def run_supervisor_graph(
     document_id: str = None,
     transactions_json: Any = None,
     goals_json: str = None,
-    domain: str = None
+    domain: str = None,
+    income: float = None,
+    current_80c_investments: float = None,
+    **kwargs
 ) -> dict:
     supervisor = SupervisorAgent()
     state = {
@@ -101,5 +135,8 @@ def run_supervisor_graph(
         "transactions_json": transactions_json,
         "goals_json": goals_json,
         "domain": domain,
+        "income": income,
+        "current_80c_investments": current_80c_investments,
+        **kwargs
     }
     return supervisor.run(state)

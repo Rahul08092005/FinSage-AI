@@ -22,6 +22,7 @@ from app.analytics.ml_categorizer import train_categorizer, retrain_from_correct
 from app.documents.ocr_adapter import OCRAdapter
 from app.documents.pipeline import process_document
 from app.adapters.splitwise_adapter import SplitwiseAdapter, calculate_group_balances
+from app.agents.report_agent import assemble_financial_report
 from app.graph.supervisor import run_supervisor_graph
 from app.schemas.advisor import (
     OrchestrateRequest,
@@ -61,6 +62,7 @@ def orchestrate(req: OrchestrateRequest):
     if isinstance(tx_json, (list, dict)):
         tx_json = json.dumps(tx_json, default=str)
 
+    current_80c = req.current_80c_investments if req.current_80c_investments is not None else req.current_investments
     result = run_supervisor_graph(
         user_id=req.user_id,
         session_id=req.session_id,
@@ -69,6 +71,8 @@ def orchestrate(req: OrchestrateRequest):
         transactions_json=tx_json,
         goals_json=req.goals_json,
         domain=req.domain,
+        income=req.income,
+        current_80c_investments=current_80c,
     )
     return OrchestrateResponse(
         answer=result.get("answer", ""),
@@ -76,6 +80,37 @@ def orchestrate(req: OrchestrateRequest):
         citations=result.get("citations", []),
         metrics=result.get("metrics", {}),
     )
+
+
+class ReportGenerateRequest(BaseModel):
+    transactions: Any = None
+    budgets: Any = None
+    goals: Any = None
+    health_score: Any = None
+    income: float | None = None
+    total_income: float | None = None
+    current_investments: float | None = None
+    current_80c_investments: float | None = None
+    investments: float | None = None
+
+
+@app.post("/internal/reports/generate")
+async def generate_report(req: ReportGenerateRequest):
+    """Generates an executive financial report including budget variance, goal progress,
+    and optional Unified Financial Plan (tax savings and SIP suggestions)."""
+    income = req.income if req.income is not None else req.total_income
+    current_inv = req.current_investments if req.current_investments is not None else (
+        req.current_80c_investments if req.current_80c_investments is not None else req.investments
+    )
+    markdown = assemble_financial_report(
+        transactions=req.transactions,
+        budgets=req.budgets,
+        goals=req.goals,
+        health_score=req.health_score,
+        income=income,
+        current_investments=current_inv,
+    )
+    return {"markdown": markdown}
 
 
 @app.post("/internal/rag/search")

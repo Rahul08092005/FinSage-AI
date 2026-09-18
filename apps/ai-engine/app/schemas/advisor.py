@@ -11,6 +11,9 @@ class OrchestrateRequest(BaseModel):
     transactions_json: Any = None
     goals_json: Optional[str] = None
     domain: Optional[str] = None
+    income: Optional[float] = None
+    current_80c_investments: Optional[float] = None
+    current_investments: Optional[float] = None
 
 
 class OrchestrateResponse(BaseModel):
