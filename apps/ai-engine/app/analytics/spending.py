@@ -230,20 +230,30 @@ def calculate_health_score(
 
 
 def forecast_expenses(transactions: pd.DataFrame, months_ahead: int = 1) -> dict:
-    """Forecast future monthly spending per category using historical averages.
+    """Forecast future monthly spending per category.
 
-    Note: This is a naive moving-average forecast, not a trained time-series model.
-    It computes the average monthly spend per category over the available history
-    and projects that forward by `months_ahead` months.
+    Strategy:
+      - If a category has **3 or more months** of history, fit a simple
+        linear trend (least-squares, numpy.polyfit degree=1) and project
+        forward by ``months_ahead`` using the trend line.
+      - If fewer than 3 months exist, fall back to the Phase 4 flat-average
+        approach (not enough data points for a meaningful trend).
+
+    numpy ships with pandas — no new dependency needed.
+
+    Note: This is an illustrative deterministic projection, not a trained
+    time-series model or financial advice.
 
     Args:
-        transactions: DataFrame containing transactions with 'date' (or 'transactionDate'),
-                      'amount', and 'category'.
+        transactions: DataFrame containing transactions with 'date' (or
+                      'transactionDate'), 'amount', and 'category'.
         months_ahead: Number of months to project forward (default 1).
 
     Returns:
         { category: projected_amount }
     """
+    import numpy as np
+
     if transactions is None or transactions.empty:
         return {}
 
@@ -274,21 +284,41 @@ def forecast_expenses(transactions: pd.DataFrame, months_ahead: int = 1) -> dict
     if df.empty:
         return {}
 
-    df["month"] = df["date"].dt.to_period("M").astype(str)
+    df["month"] = df["date"].dt.to_period("M")
 
-    # Average monthly spend per category across active months
-    monthly_by_cat = (
-        df.groupby(["category", "month"])["amount"]
-        .sum()
-        .groupby(level="category")
-        .mean()
-    )
+    multiplier = max(1, int(months_ahead)) if months_ahead is not None else 1
+    result: dict[str, float] = {}
 
-    multiplier = max(0, int(months_ahead)) if months_ahead is not None else 1
-    return {
-        cat: round(float(avg) * multiplier, 2)
-        for cat, avg in monthly_by_cat.items()
-    }
+    for cat, group in df.groupby("category"):
+        monthly_totals = group.groupby("month")["amount"].sum().sort_index()
+        n_months = len(monthly_totals)
+
+        if n_months >= 3:
+            # --- Linear trend (least-squares) ---
+            # x-axis: 0, 1, 2, ... (month indices)
+            # y-axis: monthly total spend
+            x = np.arange(n_months, dtype=float)
+            y = monthly_totals.values.astype(float)
+
+            # polyfit degree 1 => [slope, intercept]
+            slope, intercept = np.polyfit(x, y, 1)
+
+            # Project forward: next month index = n_months, then n_months+1, ...
+            # For months_ahead=1, projected value = slope*(n_months) + intercept
+            # For months_ahead>1, sum projected values for the next N months
+            projected = 0.0
+            for i in range(multiplier):
+                val = slope * (n_months + i) + intercept
+                # Floor at 0 — projected spend can't be negative
+                projected += max(0.0, val)
+
+            result[str(cat)] = round(projected, 2)
+        else:
+            # --- Flat-average fallback (< 3 months of history) ---
+            avg = float(monthly_totals.mean())
+            result[str(cat)] = round(avg * multiplier, 2)
+
+    return result
 
 
 def calculate_goal_projection(

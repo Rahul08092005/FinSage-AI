@@ -264,3 +264,42 @@ async def retrain_categorizer(corrected_transactions: list[dict]):
     subsequent calls to categorize_transaction() reflect the corrections."""
     retrain_from_corrections(corrected_transactions)
     return {"status": "ok", "retrained_on": len(corrected_transactions)}
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — Bank/UPI SMS-parsing adapter (Kavya, Step 4)
+# ---------------------------------------------------------------------------
+
+
+class SMSParseRequest(BaseModel):
+    sms_text: str
+
+
+@app.post("/internal/adapters/bank-upi/parse")
+async def bank_upi_parse(req: SMSParseRequest):
+    """Parse an Indian bank/UPI SMS into a normalised transaction dict.
+
+    Response shape (contractual):
+        { "transaction": {...normalized} | null, "confidence": float }
+
+    Uses the same confidence-scoring approach as document processing
+    (score_extraction from confidence.py).
+    """
+    from app.adapters.bank_upi_adapter import BankUPIAdapter, parse_sms
+    from app.documents.confidence import score_extraction
+
+    parsed = parse_sms(req.sms_text)
+
+    if parsed is None:
+        return {"transaction": None, "confidence": 0.0}
+
+    # Normalise through the adapter interface
+    adapter = BankUPIAdapter()
+    normalised_list = adapter.normalize_data(parsed)
+    normalised = normalised_list[0] if normalised_list else None
+
+    # Compute confidence using the same scoring as document extraction
+    confidence = score_extraction(parsed) if parsed else 0.0
+
+    return {"transaction": normalised, "confidence": confidence}
+
