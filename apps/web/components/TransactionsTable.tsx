@@ -9,6 +9,7 @@ import {
   getTransactions,
   importTransactionsCsv,
 } from "@/lib/api";
+import { formatINR } from "@/lib/formatCurrency";
 
 interface TransactionItem {
   id: string;
@@ -131,12 +132,6 @@ const DEFAULT_CATEGORY_META = {
 
 function getCategoryMeta(categoryName: string) {
   return CATEGORY_MAP[categoryName] || DEFAULT_CATEGORY_META;
-}
-
-function formatIndianCurrency(amount: number): string {
-  return new Intl.NumberFormat("en-IN", {
-    maximumFractionDigits: 0,
-  }).format(Math.abs(amount));
 }
 
 function formatDate(dateStr: string): string {
@@ -556,7 +551,7 @@ export function TransactionsTable({ token }: { token: string }) {
           </div>
           <div className="mt-1 flex items-baseline gap-1.5">
             <span className="font-serif text-xl sm:text-2xl font-black text-[#18122B] tabular-nums">
-              ₹ {formatIndianCurrency(summaryMetrics.thisMonthSpent)}
+              {formatINR(summaryMetrics.thisMonthSpent)}
             </span>
             <span className="rounded bg-[#FFEDD5] px-1.5 py-0.5 text-[10px] font-bold text-[#C2410C]">
               Spent
@@ -601,7 +596,7 @@ export function TransactionsTable({ token }: { token: string }) {
               {summaryMetrics.topCategoryName}
             </span>
             <span className="rounded bg-[#F5F3FF] px-1.5 py-0.5 text-[10px] font-bold text-[#6D28D9] tabular-nums">
-              ₹ {formatIndianCurrency(summaryMetrics.topCategoryAmount)}
+              {formatINR(summaryMetrics.topCategoryAmount)}
             </span>
           </div>
           <p className="mt-0.5 text-[10px] text-[#18122B]/50 font-medium">
@@ -977,7 +972,7 @@ export function TransactionsTable({ token }: { token: string }) {
                     {/* Right: Amount & ⋯ Menu */}
                     <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                       <span className="font-serif text-sm sm:text-base font-black text-[#18122B] tabular-nums tracking-tight">
-                        - ₹ {formatIndianCurrency(item.amount)}
+                        - {formatINR(item.amount)}
                       </span>
 
                       {/* Action Menu (⋯) */}
@@ -1038,7 +1033,7 @@ export function TransactionsTable({ token }: { token: string }) {
 
                           <div className="flex items-center gap-3">
                             <span className="font-serif font-bold text-[#18122B]">
-                              - ₹ {formatIndianCurrency(subItem.amount)}
+                              - {formatINR(subItem.amount)}
                             </span>
                             <button
                               onClick={() => handleOpenEdit(subItem)}
@@ -1178,8 +1173,7 @@ export function TransactionsTable({ token }: { token: string }) {
             </h3>
             <p className="mt-1 text-xs text-[#18122B]/70 font-medium">
               Are you sure you want to delete{" "}
-              <strong className="text-[#18122B]">"{deleteCandidate.description}"</strong> (₹
-              {formatIndianCurrency(deleteCandidate.amount)})? This action cannot be undone.
+              <strong className="text-[#18122B]">"{deleteCandidate.description}"</strong> ({formatINR(deleteCandidate.amount)})? This action cannot be undone.
             </p>
 
             <div className="mt-5 flex items-center justify-end gap-2">

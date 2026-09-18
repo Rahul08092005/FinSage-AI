@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { createGoal, deleteGoal, getGoals } from "@/lib/api";
+import { formatINR } from "@/lib/formatCurrency";
 
 interface GoalItem {
   id: string;
@@ -136,7 +137,7 @@ export function GoalCard({ token }: { token: string }) {
     const next = current + delta;
     setGoalSaved(goalId, next);
     setSavingsVersion((v) => v + 1);
-    showMessage(`Added ₹${delta.toLocaleString("en-IN")} to mission!`);
+    showMessage(`Added ${formatINR(delta)} to mission!`);
     setContributionInput("");
   }
 
@@ -190,7 +191,7 @@ export function GoalCard({ token }: { token: string }) {
       return `"${closest.title}" is past its target date. Time for a quick reset!`;
     }
     if (saved > 0 && diff > 0) {
-      return `You're ₹${diff.toLocaleString("en-IN")} away from your "${closest.title}" mission.`;
+      return `You're ${formatINR(diff)} away from your "${closest.title}" mission.`;
     }
     return `Next milestone: "${closest.title}" target date arrives in ${diffDays} days.`;
   }, [goals, savingsVersion]);
@@ -247,7 +248,7 @@ export function GoalCard({ token }: { token: string }) {
                 TOTAL TARGET
               </p>
               <p className="font-serif text-xl sm:text-2xl font-bold text-[#18122B] mt-0.5">
-                ₹ {summary.totalTarget.toLocaleString("en-IN")}
+                {formatINR(summary.totalTarget)}
               </p>
             </div>
 
@@ -256,7 +257,7 @@ export function GoalCard({ token }: { token: string }) {
                 FUNDS ALLOCATED
               </p>
               <p className="font-serif text-xl sm:text-2xl font-bold text-lime-700 mt-0.5">
-                ₹ {summary.totalSaved.toLocaleString("en-IN")}
+                {formatINR(summary.totalSaved)}
               </p>
             </div>
 
@@ -265,7 +266,7 @@ export function GoalCard({ token }: { token: string }) {
                 REMAINING TO GO
               </p>
               <p className="font-serif text-xl sm:text-2xl font-bold text-stone-600 mt-0.5">
-                ₹ {summary.remaining.toLocaleString("en-IN")}
+                {formatINR(summary.remaining)}
               </p>
             </div>
           </div>
@@ -452,19 +453,19 @@ export function GoalCard({ token }: { token: string }) {
                     {/* Financial Amounts */}
                     <div className="text-right flex-1">
                       <p className="font-serif text-xl sm:text-2xl font-bold text-[#18122B] tabular-nums">
-                        ₹ {target.toLocaleString("en-IN")}
+                        {formatINR(target)}
                       </p>
                       <p className="text-[11px] font-medium text-stone-500">
                         {saved > 0 ? (
                           <>
-                            <span className="text-lime-700 font-semibold">₹ {saved.toLocaleString("en-IN")}</span> saved
+                            <span className="text-lime-700 font-semibold">{formatINR(saved)}</span> saved
                           </>
                         ) : (
-                          "₹ 0 allocated"
+                          `${formatINR(0)} allocated`
                         )}
                       </p>
                       <p className="text-[10px] font-semibold text-stone-400 mt-0.5">
-                        ₹ {remaining.toLocaleString("en-IN")} to go
+                        {formatINR(remaining)} to go
                       </p>
                     </div>
                   </div>
@@ -668,7 +669,7 @@ export function GoalCard({ token }: { token: string }) {
                           TARGET AMOUNT
                         </span>
                         <p className="font-serif text-xl font-bold text-[#18122B]">
-                          ₹ {target.toLocaleString("en-IN")}
+                          {formatINR(target)}
                         </p>
                       </div>
                       <div>
@@ -676,7 +677,7 @@ export function GoalCard({ token }: { token: string }) {
                           STASHED SO FAR
                         </span>
                         <p className="font-serif text-lg font-bold text-lime-700">
-                          ₹ {saved.toLocaleString("en-IN")}
+                          {formatINR(saved)}
                         </p>
                       </div>
                       <div>
@@ -708,7 +709,7 @@ export function GoalCard({ token }: { token: string }) {
                           onClick={() => handleAddContribution(selectedGoal.id, amt)}
                           className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs font-semibold text-[#18122B] hover:bg-lime-400/30 hover:border-lime-500/40 transition cursor-pointer"
                         >
-                          + ₹{amt.toLocaleString("en-IN")}
+                          + {formatINR(amt)}
                         </button>
                       ))}
                     </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useMemo } from "react";
 import { confirmDocument, getDocuments, getDocumentStatus, uploadDocument } from "@/lib/api";
+import { formatINR } from "@/lib/formatCurrency";
 
 const CATEGORIES = ["Food", "Transport", "Shopping", "Bills", "Entertainment", "Other"];
 
@@ -898,7 +899,7 @@ export function DocumentUpload({ token }: { token: string }) {
                                 </span>
                               ) : (
                                 <span className="font-serif font-bold text-[#18122B] tabular-nums">
-                                  ₹ {Number(row.amount).toLocaleString("en-IN")}
+                                  {formatINR(Number(row.amount))}
                                 </span>
                               )}
                             </td>

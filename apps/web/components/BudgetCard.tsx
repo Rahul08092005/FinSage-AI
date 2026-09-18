@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { deleteBudget, getBudgets, getBudgetVariance, upsertBudget } from "@/lib/api";
+import { formatINR } from "@/lib/formatCurrency";
 
 interface VarianceItem {
   category: string;
@@ -28,12 +29,6 @@ const CATEGORY_META: Record<string, { icon: string; name: string }> = {
 
 function getCategoryMeta(cat: string) {
   return CATEGORY_META[cat] || { icon: "💳", name: cat };
-}
-
-function formatIndianCurrency(amount: number): string {
-  return new Intl.NumberFormat("en-IN", {
-    maximumFractionDigits: 0,
-  }).format(Math.abs(amount));
 }
 
 // Circular SVG Progress Ring Component
@@ -230,7 +225,7 @@ export function BudgetCard({ token }: { token: string }) {
 
     if (overallPct > 100) {
       statusLabel = "OVER BUDGET";
-      statusMessage = `You've exceeded your combined limit by ₹${formatIndianCurrency(
+      statusMessage = `You've exceeded your combined limit by ${formatINR(
         Math.abs(remaining)
       )}. Time to plug the leaks.`;
     } else if (overallPct >= 80) {
@@ -417,7 +412,7 @@ export function BudgetCard({ token }: { token: string }) {
           <div className="flex sm:flex-col items-center sm:items-end justify-between border-t border-[#E5DAC4]/60 pt-2.5 sm:border-t-0 sm:pt-0 shrink-0">
             <div className="text-left sm:text-right">
               <span className="font-serif text-lg sm:text-2xl font-black text-[#18122B] tabular-nums">
-                ₹ {formatIndianCurrency(pulseMetrics.totalSpent)}
+                {formatINR(pulseMetrics.totalSpent)}
               </span>
               <span className="ml-1 text-xs font-bold text-[#18122B]/50">spent</span>
             </div>
@@ -428,8 +423,7 @@ export function BudgetCard({ token }: { token: string }) {
                   pulseMetrics.remaining < 0 ? "text-rose-600" : "text-[#84cc16]"
                 }`}
               >
-                {pulseMetrics.remaining < 0 ? "-" : ""}₹{" "}
-                {formatIndianCurrency(pulseMetrics.remaining)}
+                {formatINR(pulseMetrics.remaining)}
               </span>
               <span className="ml-1 text-[11px] font-semibold text-[#18122B]/50">
                 {pulseMetrics.remaining < 0 ? "over ceiling" : "left to spend"}
@@ -524,10 +518,10 @@ export function BudgetCard({ token }: { token: string }) {
 
                     <div className="flex-1 text-right">
                       <span className="block font-serif text-xl sm:text-2xl font-black text-[#18122B] tabular-nums tracking-tight">
-                        ₹ {formatIndianCurrency(v.spent)}
+                        {formatINR(v.spent)}
                       </span>
                       <span className="block text-[11px] font-semibold text-[#18122B]/50">
-                        of ₹ {formatIndianCurrency(v.limit)}
+                        of {formatINR(v.limit)}
                       </span>
                       <span
                         className={`block text-[10px] font-bold tabular-nums mt-0.5 ${
@@ -535,8 +529,8 @@ export function BudgetCard({ token }: { token: string }) {
                         }`}
                       >
                         {remaining < 0
-                          ? `₹ ${formatIndianCurrency(Math.abs(remaining))} over ceiling`
-                          : `₹ ${formatIndianCurrency(remaining)} left`}
+                          ? `${formatINR(Math.abs(remaining))} over ceiling`
+                          : `${formatINR(remaining)} left`}
                       </span>
                     </div>
                   </div>

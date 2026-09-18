@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { getMe, updateMonthlySalary } from "@/lib/api";
+import { formatINR } from "@/lib/formatCurrency";
 
 export function SalaryCard({ token }: { token: string }) {
   const [salary, setSalary] = useState<number | null>(null);
@@ -110,7 +111,7 @@ export function SalaryCard({ token }: { token: string }) {
         </div>
       ) : (
         <p className="font-serif text-2xl font-semibold tracking-tight text-ink tabular-nums lg:text-3xl">
-          ₹ {Number(salary).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+          {formatINR(Number(salary), { maximumFractionDigits: 2 })}
         </p>
       )}
     </div>

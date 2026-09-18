@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { formatINR } from "@/lib/formatCurrency";
 
 interface CategoryItem {
   category: string;
@@ -64,7 +65,7 @@ export function SpendingCharts({ categoryData, trendData, loading = false }: Spe
               WHERE YOUR MONEY WENT
             </h3>
             <p className="text-[11px] text-[#18122B]/60">
-              Top 5 spending heads • ₹ {totalExpense.toLocaleString("en-IN")} total
+              Top 5 spending heads • {formatINR(totalExpense)} total
             </p>
           </div>
 
@@ -109,7 +110,7 @@ export function SpendingCharts({ categoryData, trendData, loading = false }: Spe
                     </div>
                     <div className="flex items-baseline gap-1.5 tabular-nums">
                       <span className="font-serif font-bold text-xs sm:text-sm">
-                        ₹ {amount.toLocaleString("en-IN")}
+                        {formatINR(amount)}
                       </span>
                       <span className="text-[10px] text-[#18122B]/50 font-medium">({percentage}%)</span>
                     </div>
@@ -170,7 +171,7 @@ export function SpendingCharts({ categoryData, trendData, loading = false }: Spe
                       : "opacity-0 pointer-events-none"
                   }`}
                 >
-                  ₹{(amount / 1000).toFixed(1)}k
+                  {formatINR(amount)}
                 </div>
 
                 {/* The Bar */}

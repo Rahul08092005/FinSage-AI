@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { confirmDocument } from "@/lib/api";
+import { formatINR } from "@/lib/formatCurrency";
 
 export interface ExtractedRow {
   amount: number | string;
@@ -292,8 +293,7 @@ export function DocumentReviewModal({
                 Total Voucher Debit:
               </span>
               <span className="font-serif text-base font-semibold tabular-nums text-ink">
-                ₹{" "}
-                {totalAmount.toLocaleString("en-IN", {
+                {formatINR(totalAmount, {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
                 })}

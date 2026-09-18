@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { formatINR } from "@/lib/formatCurrency";
 
 interface MoneyMoveCardProps {
   salary: number | null;
@@ -48,9 +49,9 @@ export function MoneyMoveCard({ salary, spend }: MoneyMoveCardProps) {
 
         {/* Editorial Body */}
         <p className="mt-3 text-sm sm:text-base font-semibold leading-relaxed text-[#18122B]/85">
-          You generated <strong className="text-[#18122B] font-black">₹{retained.toLocaleString("en-IN")}</strong> in free
+          You generated <strong className="text-[#18122B] font-black">{formatINR(retained)}</strong> in free
           cash flow this September. Deploying{" "}
-          <strong className="text-[#18122B] font-black">₹{recommendedBuffer.toLocaleString("en-IN")}</strong> into your
+          <strong className="text-[#18122B] font-black">{formatINR(recommendedBuffer)}</strong> into your
           emergency reserve protects your streak against seasonal volatility.
         </p>
 
