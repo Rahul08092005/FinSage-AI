@@ -14,6 +14,48 @@ interface DocumentItem {
   confidence: number | null;
   uploadedAt: string;
   extractedJson?: any;
+  ocrError?: string | null;
+  processing_error?: string | null;
+  error?: string | null;
+  errorMessage?: string | null;
+  detail?: string | null;
+  [key: string]: any;
+}
+
+export function getDocumentError(doc: any): string | null {
+  if (!doc) return null;
+
+  const candidates = [
+    doc.error,
+    doc.ocrError,
+    doc.processing_error,
+    doc.errorMessage,
+    doc.detail,
+    doc.extractedJson?.error,
+  ];
+
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim().length > 0) {
+      return c.trim();
+    }
+    if (typeof c === "object" && c !== null) {
+      if (typeof c.message === "string" && c.message.trim().length > 0) {
+        return c.message.trim();
+      }
+      if (typeof c.error === "string" && c.error.trim().length > 0) {
+        return c.error.trim();
+      }
+      if (typeof c.detail === "string" && c.detail.trim().length > 0) {
+        return c.detail.trim();
+      }
+    }
+  }
+
+  if (doc.status === "FAILED") {
+    return "Document processing failed. Please try again.";
+  }
+
+  return null;
 }
 
 interface EditableTransactionRow {
@@ -48,6 +90,7 @@ export function DocumentUpload({ token }: { token: string }) {
   const [confirming, setConfirming] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewSuccess, setReviewSuccess] = useState<string | null>(null);
+  const [expandedErrors, setExpandedErrors] = useState<Record<string, boolean>>({});
 
   function stopPolling() {
     if (pollIntervalRef.current) {
@@ -362,7 +405,7 @@ export function DocumentUpload({ token }: { token: string }) {
       case "FAILED":
         return (
           <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 border border-rose-200 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-800">
-            ✕ EXTRACTION FAILED
+            ✕ FAILED
           </span>
         );
       default:
@@ -375,7 +418,19 @@ export function DocumentUpload({ token }: { token: string }) {
   }
 
   // Render OCR Confidence Visual Indicator
-  function renderConfidenceMeter(conf: number | null) {
+  function renderConfidenceMeter(conf: number | null, status?: string) {
+    if (status === "FAILED") {
+      return (
+        <div className="flex items-center gap-2">
+          <div className="w-14 h-1.5 rounded-full bg-rose-100 overflow-hidden">
+            <div className="h-full rounded-full bg-rose-500 w-0" />
+          </div>
+          <span className="text-[10px] font-bold text-rose-800 uppercase tracking-tight">
+            0% EXTRACTION FAILED
+          </span>
+        </div>
+      );
+    }
     if (conf == null) {
       return <span className="text-[10px] font-semibold text-stone-400 italic">CALCULATING…</span>;
     }
@@ -640,6 +695,9 @@ export function DocumentUpload({ token }: { token: string }) {
               const formattedDate = new Date(d.uploadedAt)
                 .toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
                 .toUpperCase();
+              const dError = getDocumentError(d);
+              const isLongError = Boolean(dError && dError.length > 90);
+              const isExpandedError = Boolean(expandedErrors[d.id]);
 
               return (
                 <div
@@ -673,22 +731,62 @@ export function DocumentUpload({ token }: { token: string }) {
                       <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
                         OCR SCORE
                       </span>
-                      {renderConfidenceMeter(d.confidence)}
+                      {renderConfidenceMeter(d.confidence, d.status)}
                     </div>
                   </div>
 
-                  {/* Card Bottom: Status Pill + Action */}
-                  <div className="mt-4 pt-3 border-t border-stone-100 flex items-center justify-between gap-2">
-                    {renderStatusPill(d.status)}
+                  {/* Card Bottom: Status Pill + Action + Error Surfacing */}
+                  <div className="mt-4 pt-3 border-t border-stone-100 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      {renderStatusPill(d.status)}
 
-                    <div className="flex items-center gap-1">
-                      <span className="text-[11px] font-semibold text-stone-500 group-hover:text-[#18122B] transition">
-                        {d.status === "NEEDS_REVIEW" ? "Review" : "Details"}
-                      </span>
-                      <span className="h-6 w-6 rounded-full bg-stone-100 flex items-center justify-center text-xs text-stone-600 group-hover:bg-[#18122B] group-hover:text-white transition">
-                        →
-                      </span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[11px] font-semibold text-stone-500 group-hover:text-[#18122B] transition">
+                          {d.status === "NEEDS_REVIEW" || d.status === "FAILED" || dError ? "Review" : "Details"}
+                        </span>
+                        <span className="h-6 w-6 rounded-full bg-stone-100 flex items-center justify-center text-xs text-stone-600 group-hover:bg-[#18122B] group-hover:text-white transition">
+                          →
+                        </span>
+                      </div>
                     </div>
+
+                    {/* Surfaced Error Message */}
+                    {(d.status === "FAILED" || dError) && (
+                      <div className="rounded-xl border border-rose-200/90 bg-rose-50/80 p-2.5 text-left transition space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-rose-800">
+                            <span>⚠</span>
+                            <span>NEEDS ATTENTION</span>
+                          </div>
+                          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm bg-rose-100/90 text-rose-800 border border-rose-200/80 tracking-wider">
+                            {d.status === "FAILED" ? "FAILED" : "ATTENTION"}
+                          </span>
+                        </div>
+                        <p className="text-[11px] font-medium text-rose-900/90 leading-relaxed break-words">
+                          {isLongError && !isExpandedError ? `${dError!.slice(0, 90)}…` : dError}
+                        </p>
+                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-rose-200/50">
+                          {isLongError ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedErrors((prev) => ({ ...prev, [d.id]: !prev[d.id] }));
+                              }}
+                              className="text-[10px] font-semibold text-rose-700 underline underline-offset-2 hover:text-rose-900 cursor-pointer"
+                            >
+                              {isExpandedError ? "Show less" : "Show details"}
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-rose-600/75 font-medium">Click to review</span>
+                          )}
+                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-100/90 hover:bg-rose-200 px-2.5 py-0.5 text-[10px] font-bold text-rose-800 border border-rose-300/80 shadow-2xs transition cursor-pointer">
+                            <span>Review</span>
+                            <span>→</span>
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -748,16 +846,31 @@ export function DocumentUpload({ token }: { token: string }) {
               <div>
                 <span className="text-[10px] font-bold text-stone-400 uppercase">OCR CONFIDENCE</span>
                 <div className="mt-0.5">
-                  {renderConfidenceMeter(inspectDoc.confidence)}
+                  {renderConfidenceMeter(inspectDoc.confidence, inspectDoc.status)}
                 </div>
               </div>
             </div>
 
             {/* Extracted Transactions Editor / Auditor */}
             <div className="mt-4">
-              {inspectDoc.status === "NEEDS_REVIEW" && (
-                <div className="mb-3 rounded-xl bg-amber-50 border border-amber-200 p-3 flex items-start gap-2.5">
-                  <span className="text-base leading-none">👀</span>
+              {/* Surfaced Error Alert if Failed or Error present */}
+              {(inspectDoc.status === "FAILED" || getDocumentError(inspectDoc)) && (
+                <div className="mb-3 rounded-xl bg-rose-50 border border-rose-200 p-3 flex items-start gap-2.5 text-left">
+                  <span className="text-base leading-none text-rose-600 shrink-0">⚠</span>
+                  <div className="flex-1">
+                    <p className="text-xs font-bold text-rose-900">
+                      {inspectDoc.status === "FAILED" ? "OCR Extraction Incomplete" : "Processing Attention Required"}
+                    </p>
+                    <p className="text-[11px] font-medium text-rose-800/90 mt-0.5 leading-relaxed">
+                      {getDocumentError(inspectDoc) || "Document processing failed. Please try again."}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {inspectDoc.status === "NEEDS_REVIEW" && !getDocumentError(inspectDoc) && (
+                <div className="mb-3 rounded-xl bg-amber-50 border border-amber-200 p-3 flex items-start gap-2.5 text-left">
+                  <span className="text-base leading-none shrink-0">👀</span>
                   <div>
                     <p className="text-xs font-bold text-amber-900">
                       Review Required Before Recording
@@ -769,34 +882,20 @@ export function DocumentUpload({ token }: { token: string }) {
                 </div>
               )}
 
-              {inspectDoc.status === "FAILED" && (
-                <div className="mb-3 rounded-xl bg-rose-50 border border-rose-200 p-3 flex items-start gap-2.5">
-                  <span className="text-base leading-none">✕</span>
-                  <div>
-                    <p className="text-xs font-bold text-rose-900">
-                      OCR Parsing Incomplete
-                    </p>
-                    <p className="text-[11px] text-rose-800/90 mt-0.5">
-                      FinSage couldn’t parse this document. The image might be blurry, cropped, or in an unsupported format. You can re-upload a clearer image or manually record transactions.
-                    </p>
-                  </div>
-                </div>
-              )}
-
               <div className="flex items-center justify-between mb-2">
                 <div>
                   <h4 className="font-serif text-sm font-bold text-[#18122B]">
-                    {inspectDoc.status === "NEEDS_REVIEW"
+                    {inspectDoc.status === "NEEDS_REVIEW" || inspectDoc.status === "FAILED"
                       ? "Verify Extracted Transactions"
                       : "Extracted Financial Items"}
                   </h4>
                   <p className="text-[11px] text-stone-500">
-                    {inspectDoc.status === "NEEDS_REVIEW"
+                    {inspectDoc.status === "NEEDS_REVIEW" || inspectDoc.status === "FAILED"
                       ? "Review and correct amounts before committing to your ledger."
                       : "Transactions successfully verified and registered into your financial trail."}
                   </p>
                 </div>
-                {inspectDoc.status === "NEEDS_REVIEW" && (
+                {(inspectDoc.status === "NEEDS_REVIEW" || inspectDoc.status === "FAILED") && (
                   <button
                     type="button"
                     onClick={handleAddRow}
@@ -808,121 +907,126 @@ export function DocumentUpload({ token }: { token: string }) {
               </div>
 
               {/* Editable Table */}
-              <div className="rounded-2xl border border-stone-200/80 bg-white overflow-hidden shadow-xs">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="border-b border-stone-100 bg-[#FAF7F2] text-[10px] font-bold uppercase tracking-wider text-stone-400">
-                        <th className="py-2.5 px-3">Date</th>
-                        <th className="py-2.5 px-3">Description</th>
-                        <th className="py-2.5 px-3">Category</th>
-                        <th className="py-2.5 px-3 text-right">Amount (₹)</th>
-                        {inspectDoc.status === "NEEDS_REVIEW" && <th className="py-2.5 px-2 w-8"></th>}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-stone-100">
-                      {reviewRows.map((row, idx) => {
-                        const isUnreadable = row.amount === "" || isNaN(Number(row.amount)) || Number(row.amount) <= 0;
-                        return (
-                          <tr key={idx} className="hover:bg-stone-50/50 transition">
-                            <td className="py-2 px-3">
-                              {inspectDoc.status === "NEEDS_REVIEW" ? (
-                                <input
-                                  type="date"
-                                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs text-[#18122B] focus:border-[#18122B] focus:outline-none"
-                                  value={row.transactionDate}
-                                  onChange={(e) => handleRowChange(idx, "transactionDate", e.target.value)}
-                                />
-                              ) : (
-                                <span className="font-mono text-stone-600">{row.transactionDate}</span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3">
-                              {inspectDoc.status === "NEEDS_REVIEW" ? (
-                                <input
-                                  type="text"
-                                  placeholder="Description"
-                                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs text-[#18122B] focus:border-[#18122B] focus:outline-none"
-                                  value={row.description}
-                                  onChange={(e) => handleRowChange(idx, "description", e.target.value)}
-                                />
-                              ) : (
-                                <span className="font-medium text-[#18122B]">{row.description}</span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3">
-                              {inspectDoc.status === "NEEDS_REVIEW" ? (
-                                <select
-                                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-[#18122B] focus:border-[#18122B] focus:outline-none"
-                                  value={row.category}
-                                  onChange={(e) => handleRowChange(idx, "category", e.target.value)}
-                                >
-                                  {CATEGORIES.map((c) => (
-                                    <option key={c} value={c}>
-                                      {c}
-                                    </option>
-                                  ))}
-                                </select>
-                              ) : (
-                                <span className="inline-block rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600 uppercase">
-                                  {row.category}
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3 text-right">
-                              {inspectDoc.status === "NEEDS_REVIEW" ? (
-                                <div className="flex flex-col items-end">
-                                  <div className="relative inline-block w-28">
-                                    <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2 font-serif text-xs font-bold text-stone-400">
-                                      ₹
-                                    </span>
+              {(() => {
+                const isReviewable = inspectDoc.status === "NEEDS_REVIEW" || inspectDoc.status === "FAILED";
+                return (
+                  <div className="rounded-2xl border border-stone-200/80 bg-white overflow-hidden shadow-xs">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-stone-100 bg-[#FAF7F2] text-[10px] font-bold uppercase tracking-wider text-stone-400">
+                            <th className="py-2.5 px-3">Date</th>
+                            <th className="py-2.5 px-3">Description</th>
+                            <th className="py-2.5 px-3">Category</th>
+                            <th className="py-2.5 px-3 text-right">Amount (₹)</th>
+                            {isReviewable && <th className="py-2.5 px-2 w-8"></th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-stone-100">
+                          {reviewRows.map((row, idx) => {
+                            const isUnreadable = row.amount === "" || isNaN(Number(row.amount)) || Number(row.amount) <= 0;
+                            return (
+                              <tr key={idx} className="hover:bg-stone-50/50 transition">
+                                <td className="py-2 px-3">
+                                  {isReviewable ? (
                                     <input
-                                      type="number"
-                                      step="0.01"
-                                      placeholder="0.00"
-                                      className={`w-full rounded-lg border bg-white py-1 pl-5 pr-2 text-right font-serif text-xs font-bold tabular-nums text-[#18122B] focus:border-[#18122B] focus:outline-none ${
-                                        isUnreadable ? "border-amber-300 ring-1 ring-amber-200" : "border-stone-200"
-                                      }`}
-                                      value={row.amount}
-                                      onChange={(e) => handleRowChange(idx, "amount", e.target.value)}
+                                      type="date"
+                                      className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs text-[#18122B] focus:border-[#18122B] focus:outline-none"
+                                      value={row.transactionDate}
+                                      onChange={(e) => handleRowChange(idx, "transactionDate", e.target.value)}
                                     />
-                                  </div>
-                                  {isUnreadable && (
-                                    <span className="text-[9px] font-bold text-amber-700 uppercase tracking-tight mt-0.5">
-                                      Unreadable in scan
+                                  ) : (
+                                    <span className="font-mono text-stone-600">{row.transactionDate}</span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-3">
+                                  {isReviewable ? (
+                                    <input
+                                      type="text"
+                                      placeholder="Description"
+                                      className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs text-[#18122B] focus:border-[#18122B] focus:outline-none"
+                                      value={row.description}
+                                      onChange={(e) => handleRowChange(idx, "description", e.target.value)}
+                                    />
+                                  ) : (
+                                    <span className="font-medium text-[#18122B]">{row.description}</span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-3">
+                                  {isReviewable ? (
+                                    <select
+                                      className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-[#18122B] focus:border-[#18122B] focus:outline-none"
+                                      value={row.category}
+                                      onChange={(e) => handleRowChange(idx, "category", e.target.value)}
+                                    >
+                                      {CATEGORIES.map((c) => (
+                                        <option key={c} value={c}>
+                                          {c}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : (
+                                    <span className="inline-block rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600 uppercase">
+                                      {row.category}
                                     </span>
                                   )}
-                                </div>
-                              ) : isUnreadable ? (
-                                <span className="text-[11px] font-semibold text-amber-700 italic">
-                                  Amount unreadable — review required
-                                </span>
-                              ) : (
-                                <span className="font-serif font-bold text-[#18122B] tabular-nums">
-                                  {formatINR(Number(row.amount))}
-                                </span>
-                              )}
-                            </td>
-                            {inspectDoc.status === "NEEDS_REVIEW" && (
-                              <td className="py-2 px-2 text-center">
-                                {reviewRows.length > 1 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveRow(idx)}
-                                    className="rounded p-1 text-stone-400 hover:text-rose-600 hover:bg-rose-50 transition"
-                                  >
-                                    ✕
-                                  </button>
+                                </td>
+                                <td className="py-2 px-3 text-right">
+                                  {isReviewable ? (
+                                    <div className="flex flex-col items-end">
+                                      <div className="relative inline-block w-28">
+                                        <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2 font-serif text-xs font-bold text-stone-400">
+                                          ₹
+                                        </span>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          placeholder="0.00"
+                                          className={`w-full rounded-lg border bg-white py-1 pl-5 pr-2 text-right font-serif text-xs font-bold tabular-nums text-[#18122B] focus:border-[#18122B] focus:outline-none ${
+                                            isUnreadable ? "border-amber-300 ring-1 ring-amber-200" : "border-stone-200"
+                                          }`}
+                                          value={row.amount}
+                                          onChange={(e) => handleRowChange(idx, "amount", e.target.value)}
+                                        />
+                                      </div>
+                                      {isUnreadable && (
+                                        <span className="text-[9px] font-bold text-amber-700 uppercase tracking-tight mt-0.5">
+                                          Unreadable in scan
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : isUnreadable ? (
+                                    <span className="text-[11px] font-semibold text-amber-700 italic">
+                                      Amount unreadable — review required
+                                    </span>
+                                  ) : (
+                                    <span className="font-serif font-bold text-[#18122B] tabular-nums">
+                                      {formatINR(Number(row.amount))}
+                                    </span>
+                                  )}
+                                </td>
+                                {isReviewable && (
+                                  <td className="py-2 px-2 text-center">
+                                    {reviewRows.length > 1 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveRow(idx)}
+                                        className="rounded p-1 text-stone-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                                      >
+                                        ✕
+                                      </button>
+                                    )}
+                                  </td>
                                 )}
-                              </td>
-                            )}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {reviewError && (
                 <p className="mt-2 text-xs font-semibold text-rose-700">
@@ -946,7 +1050,7 @@ export function DocumentUpload({ token }: { token: string }) {
                 Close
               </button>
 
-              {inspectDoc.status === "NEEDS_REVIEW" && (
+              {(inspectDoc.status === "NEEDS_REVIEW" || inspectDoc.status === "FAILED") && (
                 <button
                   type="button"
                   onClick={handleConfirmAll}

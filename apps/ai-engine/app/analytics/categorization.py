@@ -11,6 +11,9 @@ CATEGORY_RULES: dict[str, list[str]] = {
     "Education": ["udemy", "coursera", "tuition", "college", "course"],
     "Investment": ["mutual fund", "sip", "zerodha", "groww", "stocks"],
     "Rent": ["rent", "landlord"],
+    "EMI": ["emi", "loan installment", "bajaj finserv", "hdfc loan"],
+    "Festivals & Gifts": ["diwali", "rakhi", "gift", "wedding"],
+    "Domestic Help": ["maid", "cook", "driver salary"],
 }
 DEFAULT_CATEGORY = "Other"
 
