@@ -123,9 +123,91 @@ async function main() {
       });
     }
 
-    // 5. Transactions across July, August, September 2026
+    // 5. Transactions across July, August, September 2026 (Enriched to September 19, 2026)
+    await prisma.transaction.deleteMany({ where: { userId: user.id } });
+
     const sampleTransactions = [
-      // September 2026 (Current Month)
+      // September 2026 (Current Month - Up to Today Sep 19)
+      {
+        amount: 620,
+        category: "Food & Dining",
+        description: "Swiggy Gourmet Lunch via UPI",
+        transactionDate: new Date("2026-09-19T13:15:00.000Z"),
+        source: "upi",
+        accountId: upi.id,
+      },
+      {
+        amount: 840,
+        category: "Groceries",
+        description: "Blinkit Daily Provisions via UPI",
+        transactionDate: new Date("2026-09-18T09:30:00.000Z"),
+        source: "upi",
+        accountId: upi.id,
+      },
+      {
+        amount: 390,
+        category: "Food & Dining",
+        description: "Starbucks Reserve Cold Brew via UPI",
+        transactionDate: new Date("2026-09-17T16:45:00.000Z"),
+        source: "upi",
+        accountId: upi.id,
+      },
+      {
+        amount: 320,
+        category: "Travel",
+        description: "Uber Premier to Tech Park via UPI",
+        transactionDate: new Date("2026-09-16T08:45:00.000Z"),
+        source: "upi",
+        accountId: upi.id,
+      },
+      {
+        amount: 2150,
+        category: "Shopping",
+        description: "Amazon Electronics & Peripherals",
+        transactionDate: new Date("2026-09-15T19:20:00.000Z"),
+        source: "credit_card",
+        accountId: amex.id,
+      },
+      {
+        amount: 1500,
+        category: "Healthcare",
+        description: "Cult.fit Monthly Fitness Studio via UPI",
+        transactionDate: new Date("2026-09-14T07:30:00.000Z"),
+        source: "upi",
+        accountId: upi.id,
+      },
+      {
+        amount: 1120,
+        category: "Food & Dining",
+        description: "Zomato Friday Feast via UPI",
+        transactionDate: new Date("2026-09-12T21:10:00.000Z"),
+        source: "upi",
+        accountId: upi.id,
+      },
+      {
+        amount: 560,
+        category: "Groceries",
+        description: "Zepto Quick Fresh Groceries via UPI",
+        transactionDate: new Date("2026-09-10T11:00:00.000Z"),
+        source: "upi",
+        accountId: upi.id,
+      },
+      {
+        amount: 3490,
+        category: "Shopping",
+        description: "Zara Autumn Knitwear Collection",
+        transactionDate: new Date("2026-09-08T18:15:00.000Z"),
+        source: "credit_card",
+        accountId: amex.id,
+      },
+      {
+        amount: 750,
+        category: "Entertainment",
+        description: "BookMyShow Weekend Cinema via UPI",
+        transactionDate: new Date("2026-09-07T17:00:00.000Z"),
+        source: "upi",
+        accountId: upi.id,
+      },
       {
         amount: 1450,
         category: "Food & Dining",
