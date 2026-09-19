@@ -8,6 +8,8 @@ import {
   updateTransaction,
   getTransactions,
   importTransactionsCsv,
+  parseSms,
+  confirmSmsTransaction,
 } from "@/lib/api";
 import { formatINR } from "@/lib/formatCurrency";
 
@@ -147,6 +149,107 @@ function formatDate(dateStr: string): string {
   }
 }
 
+function normalizeDateForInput(rawDate?: any): string {
+  if (!rawDate) return new Date().toISOString().slice(0, 10);
+  const trimmed = String(rawDate).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+
+  const parsed = Date.parse(trimmed);
+  if (!isNaN(parsed)) {
+    return new Date(parsed).toISOString().slice(0, 10);
+  }
+
+  const parts = trimmed.split(/[-/ ]/);
+  if (parts.length >= 2) {
+    const day = parts[0];
+    const month = parts[1];
+    const year = parts[2] ? (parts[2].length === 2 ? `20${parts[2]}` : parts[2]) : new Date().getFullYear();
+    const candidate = Date.parse(`${month} ${day}, ${year}`);
+    if (!isNaN(candidate)) {
+      return new Date(candidate).toISOString().slice(0, 10);
+    }
+  }
+
+  return new Date().toISOString().slice(0, 10);
+}
+
+interface EditableSmsDraft {
+  amount: string;
+  type: string;
+  description: string;
+  date: string;
+  category: string;
+  account: string;
+  hasAmount: boolean;
+  hasType: boolean;
+  hasDescription: boolean;
+  hasDate: boolean;
+  hasCategory: boolean;
+  hasAccount: boolean;
+  raw: Record<string, any>;
+}
+
+function extractDraft(data: any): EditableSmsDraft | null {
+  if (!data || typeof data !== "object") return null;
+
+  let candidate: any = null;
+  if (data.transaction && typeof data.transaction === "object") {
+    candidate = data.transaction;
+  } else if (data.draft && typeof data.draft === "object") {
+    candidate = data.draft;
+  } else if (data.data && typeof data.data === "object") {
+    candidate = Array.isArray(data.data) ? data.data[0] : data.data;
+  } else if (Array.isArray(data) && data.length > 0) {
+    candidate = data[0];
+  } else if (Array.isArray(data.transactions) && data.transactions.length > 0) {
+    candidate = data.transactions[0];
+  } else if (data.amount != null || data.description != null || data.merchant != null) {
+    candidate = data;
+  }
+
+  if (!candidate || typeof candidate !== "object") return null;
+
+  const hasAmount =
+    candidate.amount != null &&
+    candidate.amount !== "" &&
+    !isNaN(Number(candidate.amount));
+
+  const hasDesc = Boolean(
+    (typeof candidate.description === "string" && candidate.description.trim()) ||
+    (typeof candidate.merchant === "string" && candidate.merchant.trim())
+  );
+
+  // If both amount and description are missing or empty, it's not a usable draft
+  if (!hasAmount && !hasDesc) {
+    return null;
+  }
+
+  const hasType = candidate.type != null && candidate.type !== "";
+  const hasDate = Boolean(candidate.date || candidate.transactionDate || candidate.transaction_date);
+  const hasCategory = candidate.category != null && candidate.category !== "";
+  const hasAccount = Boolean(candidate.account || candidate.accountId || candidate.source || candidate.bank);
+
+  return {
+    amount: candidate.amount != null ? String(candidate.amount) : "",
+    type: candidate.type
+      ? String(candidate.type).toLowerCase() === "credit"
+        ? "credit"
+        : "debit"
+      : "debit",
+    description: (candidate.description || candidate.merchant || "").trim(),
+    date: normalizeDateForInput(candidate.date || candidate.transactionDate || candidate.transaction_date),
+    category: candidate.category || "Food & Dining",
+    account: candidate.account || candidate.accountId || candidate.source || candidate.bank || "",
+    hasAmount,
+    hasType,
+    hasDescription: hasDesc,
+    hasDate,
+    hasCategory,
+    hasAccount,
+    raw: candidate,
+  };
+}
+
 export function TransactionsTable({ token }: { token: string }) {
   const [items, setItems] = useState<TransactionItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -192,6 +295,14 @@ export function TransactionsTable({ token }: { token: string }) {
   const csvInputRef = useRef<HTMLInputElement | null>(null);
   const amountInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
+  const smsTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // SMS Quick-Add State
+  const [smsText, setSmsText] = useState("");
+  const [isParsingSms, setIsParsingSms] = useState(false);
+  const [smsDraft, setSmsDraft] = useState<EditableSmsDraft | null>(null);
+  const [smsError, setSmsError] = useState<string | null>(null);
+  const [isConfirmingSms, setIsConfirmingSms] = useState(false);
 
   function showToast(msg: string) {
     setMessage(msg);
@@ -278,6 +389,114 @@ export function TransactionsTable({ token }: { token: string }) {
         csvInputRef.current.value = "";
       }
     }
+  }
+
+  // Handle Bank / UPI SMS Parse
+  async function handleParseSms() {
+    const trimmed = smsText.trim();
+    if (!trimmed) {
+      setSmsError("Please paste an SMS text to parse");
+      return;
+    }
+
+    setSmsError(null);
+    setIsParsingSms(true);
+    try {
+      const res = await parseSms(token, trimmed);
+      const draft = extractDraft(res);
+      if (!draft) {
+        setSmsError("Couldn't recognize this message format");
+        setSmsDraft(null);
+        return;
+      }
+      setSmsDraft(draft);
+    } catch (err: any) {
+      console.error("SMS parse error:", err);
+      const rawMsg = err?.message || "";
+      const isUnrecognized =
+        !rawMsg ||
+        rawMsg.includes("[object") ||
+        rawMsg.includes("Failed to parse SMS") ||
+        rawMsg.includes("Failed to fetch") ||
+        rawMsg.includes("404") ||
+        rawMsg.includes("500") ||
+        rawMsg.toLowerCase().includes("not recognize") ||
+        rawMsg.toLowerCase().includes("unknown format");
+
+      setSmsError(isUnrecognized ? "Couldn't recognize this message format" : rawMsg);
+      setSmsDraft(null);
+    } finally {
+      setIsParsingSms(false);
+    }
+  }
+
+  // Handle Bank / UPI SMS Confirmation (Review-before-commit)
+  async function handleConfirmSms() {
+    if (!smsDraft) return;
+
+    const amt = parseFloat(smsDraft.amount);
+    if (smsDraft.hasAmount && (isNaN(amt) || amt <= 0)) {
+      setSmsError("Please enter a valid positive amount.");
+      return;
+    }
+    if (smsDraft.hasDescription && !smsDraft.description.trim()) {
+      setSmsError("Description cannot be empty.");
+      return;
+    }
+
+    setSmsError(null);
+    setIsConfirmingSms(true);
+
+    try {
+      const payload: Record<string, any> = {
+        ...smsDraft.raw,
+      };
+      if (smsDraft.hasAmount) payload.amount = amt;
+      if (smsDraft.hasDescription) {
+        payload.description = smsDraft.description.trim();
+        if (smsDraft.raw.merchant) payload.merchant = smsDraft.description.trim();
+      }
+      if (smsDraft.hasType) payload.type = smsDraft.type;
+      if (smsDraft.hasDate) {
+        payload.date = smsDraft.date;
+        payload.transactionDate = new Date(smsDraft.date).toISOString();
+      } else {
+        payload.transactionDate = new Date().toISOString();
+      }
+      if (smsDraft.hasCategory) payload.category = smsDraft.category;
+      if (smsDraft.hasAccount) {
+        payload.account = smsDraft.account;
+        if (smsDraft.raw.accountId) payload.accountId = smsDraft.account;
+        if (smsDraft.raw.source) payload.source = smsDraft.account;
+      }
+
+      await confirmSmsTransaction(token, payload);
+
+      // Refresh transactions using existing transaction-fetching pattern
+      await load();
+
+      // Clear the SMS textarea and draft review state
+      setSmsText("");
+      setSmsDraft(null);
+      setSmsError(null);
+      showToast("SMS transaction confirmed and recorded!");
+    } catch (err: any) {
+      console.error("Failed to confirm SMS transaction:", err);
+      // Keep draft visible, preserve user's edits, show readable error
+      const msg =
+        err?.message && !err.message.includes("[object")
+          ? err.message
+          : "Failed to confirm transaction. Please try again.";
+      setSmsError(msg);
+    } finally {
+      setIsConfirmingSms(false);
+    }
+  }
+
+  // Discard draft and reset to SMS input
+  function handleDiscardDraft() {
+    setSmsDraft(null);
+    setSmsError(null);
   }
 
   // Handle Edit Trigger
@@ -706,6 +925,19 @@ export function TransactionsTable({ token }: { token: string }) {
                 onChange={handleCsvUpload}
               />
             </label>
+
+            {/* Quick-Add via SMS Button */}
+            <button
+              type="button"
+              onClick={() => {
+                smsTextareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+                setTimeout(() => smsTextareaRef.current?.focus(), 150);
+              }}
+              className="inline-flex items-center justify-center gap-1 rounded-lg border border-[#DDD9CF] bg-white px-3 py-2 text-xs font-semibold text-[#18122B] shadow-sm transition-all hover:border-[#18122B] hover:bg-[#FBF7EE] active:scale-95"
+            >
+              <span>💬</span>
+              <span>Paste bank SMS</span>
+            </button>
           </div>
         </form>
 
@@ -716,6 +948,272 @@ export function TransactionsTable({ token }: { token: string }) {
             <span>{message}</span>
           </div>
         )}
+
+        {/* SMS Quick-Add Flow (Review-before-commit) */}
+        <div className="mt-3 pt-2.5 border-t border-[#E5DAC4]/60">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#18122B]/70">
+                PASTE BANK SMS
+              </span>
+              <span className="rounded bg-[#84cc16]/15 px-1.5 py-0.5 text-[9px] font-bold text-[#3f6212]">
+                Quick-Add
+              </span>
+            </div>
+            {smsDraft ? (
+              <span className="text-[10px] font-bold text-[#C2410C] bg-[#FFF7ED] px-2 py-0.5 rounded border border-[#FFEDD5]">
+                Draft ready for review
+              </span>
+            ) : (
+              <span className="text-[10px] text-[#18122B]/40 font-mono hidden sm:inline">
+                UPI &bull; IMPS &bull; NEFT &bull; Card
+              </span>
+            )}
+          </div>
+
+          {!smsDraft ? (
+            <div className="flex flex-col gap-2">
+              <textarea
+                ref={smsTextareaRef}
+                rows={2}
+                placeholder="Paste your UPI or bank transaction SMS here…"
+                value={smsText}
+                onChange={(e) => {
+                  setSmsText(e.target.value);
+                  if (smsError) setSmsError(null);
+                }}
+                className="w-full rounded-lg border border-[#DDD9CF] bg-white p-2.5 text-xs font-medium text-[#18122B] placeholder:text-[#18122B]/40 transition-all focus:border-[#84cc16] focus:outline-none focus:ring-2 focus:ring-[#84cc16]/30 resize-none"
+              />
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleParseSms}
+                    disabled={isParsingSms || !smsText.trim()}
+                    className={`group inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold shadow-sm transition-all ${
+                      smsText.trim() && !isParsingSms
+                        ? "bg-[#18122B] text-white hover:bg-[#2e234c] hover:scale-[1.02] active:scale-[0.98]"
+                        : "bg-[#18122B]/20 text-[#18122B]/40 cursor-not-allowed"
+                    }`}
+                  >
+                    <span>{isParsingSms ? "Parsing…" : "Parse"}</span>
+                    <span
+                      className={`transition-transform group-hover:translate-x-0.5 ${
+                        smsText.trim() && !isParsingSms ? "text-[#84cc16]" : "text-[#18122B]/30"
+                      }`}
+                    >
+                      &rarr;
+                    </span>
+                  </button>
+
+                  {smsText && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSmsText("");
+                        setSmsError(null);
+                      }}
+                      className="text-[11px] font-medium text-[#18122B]/50 hover:text-[#18122B] px-1.5 py-1"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                <span className="text-[10px] text-[#18122B]/40 font-medium">
+                  Review-before-commit &bull; Never committed automatically
+                </span>
+              </div>
+
+              {smsError && (
+                <div className="mt-1 flex items-center gap-2 rounded-lg border border-[#FECDD3] bg-[#FFF1F2] px-3 py-2 text-xs font-semibold text-[#BE123C] animate-fadeIn">
+                  <span>⚠️</span>
+                  <span>{smsError}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Editable Draft Review Card */
+            <div className="rounded-lg border border-[#84cc16]/40 bg-[#FBFDF6] p-3 sm:p-3.5 shadow-sm animate-fadeIn">
+              <div className="flex flex-wrap items-center justify-between gap-1 pb-2 border-b border-[#E5DAC4]/60 mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#3f6212] bg-[#84cc16]/20 px-2 py-0.5 rounded">
+                    DRAFT &mdash; REVIEW BEFORE SAVING
+                  </span>
+                  <span className="text-xs text-[#18122B]/60 font-medium hidden sm:inline">
+                    Verify and edit extracted details before confirming
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDiscardDraft}
+                  className="text-[11px] font-semibold text-[#BE123C] hover:text-[#9F1239] hover:underline"
+                >
+                  Discard Draft
+                </button>
+              </div>
+
+              {/* Dynamic Grid: Only render fields present in draft response */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                {/* Amount */}
+                {smsDraft.hasAmount && (
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#18122B]/60">
+                      Amount (₹)
+                    </label>
+                    <div className="relative">
+                      <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5 font-serif text-xs font-bold text-[#18122B]/60">
+                        ₹
+                      </span>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0.01"
+                        value={smsDraft.amount}
+                        onChange={(e) =>
+                          setSmsDraft({ ...smsDraft, amount: e.target.value })
+                        }
+                        className="w-full rounded-lg border border-[#DDD9CF] bg-white py-1.5 pl-6 pr-2.5 text-xs font-semibold text-[#18122B] focus:border-[#84cc16] focus:outline-none focus:ring-1 focus:ring-[#84cc16]"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Type */}
+                {smsDraft.hasType && (
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#18122B]/60">
+                      Transaction Type
+                    </label>
+                    <select
+                      value={smsDraft.type}
+                      onChange={(e) =>
+                        setSmsDraft({ ...smsDraft, type: e.target.value })
+                      }
+                      className="w-full rounded-lg border border-[#DDD9CF] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#18122B] focus:border-[#84cc16] focus:outline-none focus:ring-1 focus:ring-[#84cc16]"
+                    >
+                      <option value="debit">Debit (Outflow)</option>
+                      <option value="credit">Credit (Inflow)</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Merchant / Description */}
+                {smsDraft.hasDescription && (
+                  <div className="flex flex-col gap-1 sm:col-span-2 lg:col-span-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#18122B]/60">
+                      Merchant / Description
+                    </label>
+                    <input
+                      type="text"
+                      value={smsDraft.description}
+                      onChange={(e) =>
+                        setSmsDraft({ ...smsDraft, description: e.target.value })
+                      }
+                      className="w-full rounded-lg border border-[#DDD9CF] bg-white px-2.5 py-1.5 text-xs font-medium text-[#18122B] focus:border-[#84cc16] focus:outline-none focus:ring-1 focus:ring-[#84cc16]"
+                    />
+                  </div>
+                )}
+
+                {/* Date */}
+                {smsDraft.hasDate && (
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#18122B]/60">
+                      Date
+                    </label>
+                    <input
+                      type="date"
+                      value={smsDraft.date}
+                      onChange={(e) =>
+                        setSmsDraft({ ...smsDraft, date: e.target.value })
+                      }
+                      className="w-full rounded-lg border border-[#DDD9CF] bg-white px-2.5 py-1.5 text-xs font-medium text-[#18122B] focus:border-[#84cc16] focus:outline-none focus:ring-1 focus:ring-[#84cc16]"
+                    />
+                  </div>
+                )}
+
+                {/* Category */}
+                {smsDraft.hasCategory && (
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#18122B]/60">
+                      Category
+                    </label>
+                    <select
+                      value={smsDraft.category}
+                      onChange={(e) =>
+                        setSmsDraft({ ...smsDraft, category: e.target.value })
+                      }
+                      className="w-full rounded-lg border border-[#DDD9CF] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#18122B] focus:border-[#84cc16] focus:outline-none focus:ring-1 focus:ring-[#84cc16]"
+                    >
+                      <option value="Food & Dining">🍽️ Food & Dining</option>
+                      <option value="Groceries">🛒 Groceries</option>
+                      <option value="Entertainment">🎬 Entertainment</option>
+                      <option value="Shopping">🛍️ Shopping</option>
+                      <option value="Rent">🏠 Rent</option>
+                      <option value="Utilities">⚡ Utilities</option>
+                      <option value="Travel">✈️ Travel</option>
+                      <option value="Healthcare">💊 Healthcare</option>
+                      <option value="General">💳 General</option>
+                      <option value="Other">💳 Other</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Account / Payment Method */}
+                {smsDraft.hasAccount && (
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#18122B]/60">
+                      Account / Method
+                    </label>
+                    <input
+                      type="text"
+                      value={smsDraft.account}
+                      onChange={(e) =>
+                        setSmsDraft({ ...smsDraft, account: e.target.value })
+                      }
+                      className="w-full rounded-lg border border-[#DDD9CF] bg-white px-2.5 py-1.5 text-xs font-medium text-[#18122B] focus:border-[#84cc16] focus:outline-none focus:ring-1 focus:ring-[#84cc16]"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Error within draft review if validation or confirmation fails */}
+              {smsError && (
+                <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-[#FECDD3] bg-[#FFF1F2] px-3 py-2 text-xs font-semibold text-[#BE123C] animate-fadeIn">
+                  <span>⚠️</span>
+                  <span>{smsError}</span>
+                </div>
+              )}
+
+              {/* Confirm / Discard Buttons */}
+              <div className="mt-3 flex flex-wrap items-center gap-2 pt-2 border-t border-[#E5DAC4]/40">
+                <button
+                  type="button"
+                  onClick={handleConfirmSms}
+                  disabled={isConfirmingSms}
+                  className="group inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#18122B] px-4 py-2 text-xs font-bold text-white shadow-sm transition-all hover:bg-[#2e234c] hover:scale-[1.02] active:scale-[0.98] disabled:bg-[#18122B]/40 disabled:cursor-not-allowed"
+                >
+                  <span>{isConfirmingSms ? "Confirming…" : "Confirm"}</span>
+                  <span className="text-[#84cc16] font-bold">&rarr;</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDiscardDraft}
+                  disabled={isConfirmingSms}
+                  className="rounded-lg border border-[#DDD9CF] bg-white px-3 py-2 text-xs font-semibold text-[#18122B] shadow-sm transition-all hover:border-[#18122B] hover:bg-[#FBF7EE] active:scale-95 disabled:opacity-50"
+                >
+                  Discard
+                </button>
+
+                <span className="text-[10px] text-[#18122B]/50 font-mono ml-auto hidden sm:inline">
+                  Draft will be posted to your passbook
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 4. TRANSACTION TOOLBAR (Search, Filters, Sort) */}

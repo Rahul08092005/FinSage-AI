@@ -457,4 +457,64 @@ export async function importTransactionsCsv(token: string, file: File): Promise<
   return res.json();
 }
 
+export interface ParsedSmsDraft {
+  amount?: number | string;
+  type?: "debit" | "credit" | string;
+  description?: string;
+  merchant?: string;
+  date?: string;
+  transactionDate?: string;
+  category?: string;
+  account?: string;
+  accountId?: string;
+  source?: string;
+  confidence?: number;
+  [key: string]: any;
+}
 
+export interface ParseSmsResponse {
+  draft?: ParsedSmsDraft | null;
+  transaction?: ParsedSmsDraft | null;
+  confidence?: number;
+  [key: string]: any;
+}
+
+export async function parseSms(token: string, smsText: string): Promise<ParseSmsResponse | any> {
+  const res = await fetch(`${BFF_URL}/api/v1/transactions/parse-sms`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify({ smsText, sms_text: smsText }),
+  });
+  if (!res.ok) {
+    let errMsg = "Failed to parse SMS";
+    try {
+      const json = await res.json();
+      errMsg = json.error || json.message || errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+  return res.json();
+}
+
+export async function confirmSmsTransaction(
+  token: string,
+  draft: Record<string, any>
+): Promise<any> {
+  const res = await fetch(`${BFF_URL}/api/v1/transactions/confirm-sms`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify(draft),
+  });
+  if (!res.ok) {
+    let errMsg = "Failed to confirm SMS transaction";
+    try {
+      const json = await res.json();
+      errMsg =
+        json.error?.formErrors?.join(", ") ||
+        (typeof json.error === "string" ? json.error : json.message) ||
+        errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+  return res.json();
+}
