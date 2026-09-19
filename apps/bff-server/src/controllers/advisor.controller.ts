@@ -31,6 +31,7 @@ export async function advisorChat(req: AuthedRequest, res: Response) {
 
   // Call Rahul's AI orchestrator
   let answer: string;
+  let citations: any[] = [];
   try {
     const aiRes = await fetch(`${AI_ENGINE_BASE}/internal/ai/orchestrate`, {
       method: "POST",
@@ -51,6 +52,9 @@ export async function advisorChat(req: AuthedRequest, res: Response) {
 
     const body = await aiRes.json();
     answer = String(body.answer ?? body.response ?? body.text ?? "");
+    if (body.citations && Array.isArray(body.citations)) {
+      citations = body.citations;
+    }
   } catch (err: any) {
     console.error("[advisorChat] Could not reach AI engine:", err.message);
     return res.status(503).json({ error: "AI engine unreachable", detail: err.message });
@@ -68,8 +72,8 @@ export async function advisorChat(req: AuthedRequest, res: Response) {
 
   function sendNext() {
     if (index >= words.length) {
-      if (body.citations && Array.isArray(body.citations) && body.citations.length > 0) {
-        res.write(`data: [CITATIONS] ${JSON.stringify(body.citations)}\n\n`);
+      if (citations.length > 0) {
+        res.write(`data: [CITATIONS] ${JSON.stringify(citations)}\n\n`);
       }
       res.write("data: [DONE]\n\n");
       res.end();
