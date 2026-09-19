@@ -396,7 +396,13 @@ export async function getExpenseSummary(token: string, monthStr?: string) {
   return res.json();
 }
 
-export async function getSpendingTrend(token: string): Promise<Array<{ month: string; total: number }>> {
+export interface TrendItem {
+  month: string;
+  total: number;
+  byCategory?: Array<{ category: string; total: number; count: number }>;
+}
+
+export async function getSpendingTrend(token: string): Promise<TrendItem[]> {
   const months: string[] = [];
   const monthLabels: string[] = [];
   const now = new Date();
@@ -416,11 +422,15 @@ export async function getSpendingTrend(token: string): Promise<Array<{ month: st
           headers: authHeaders(token),
           cache: "no-store",
         });
-        if (!res.ok) return { month: monthLabels[idx], total: 0 };
+        if (!res.ok) return { month: monthLabels[idx], total: 0, byCategory: [] };
         const data = await res.json();
-        return { month: monthLabels[idx], total: Number(data.total) || 0 };
+        return {
+          month: monthLabels[idx],
+          total: Number(data.total) || 0,
+          byCategory: data.byCategory || [],
+        };
       } catch {
-        return { month: monthLabels[idx], total: 0 };
+        return { month: monthLabels[idx], total: 0, byCategory: [] };
       }
     })
   );

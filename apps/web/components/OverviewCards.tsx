@@ -4,13 +4,13 @@ import { useEffect, useState } from "react";
 import { AuthGate } from "@/components/AuthGate";
 import { DominantBalanceHero } from "@/components/DominantBalanceHero";
 import { SpendingCharts } from "@/components/SpendingCharts";
-import { getExpenseSummary, getHealthScore, getMe, getSpendingTrend } from "@/lib/api";
+import { getExpenseSummary, getHealthScore, getMe, getSpendingTrend, type TrendItem } from "@/lib/api";
 
 function AuthenticatedOverviewCards({ token }: { token: string }) {
   const [salary, setSalary] = useState<number | null>(null);
   const [spend, setSpend] = useState<number | null>(null);
   const [categories, setCategories] = useState<Array<{ category: string; total: number; count: number }>>([]);
-  const [trend, setTrend] = useState<Array<{ month: string; total: number }>>([]);
+  const [trend, setTrend] = useState<TrendItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
