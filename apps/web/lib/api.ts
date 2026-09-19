@@ -518,3 +518,85 @@ export async function confirmSmsTransaction(
   }
   return res.json();
 }
+
+export interface TaxProfileData {
+  annualIncome: number;
+  current80cInvestments: number;
+  [key: string]: any;
+}
+
+export async function updateTaxProfile(
+  token: string,
+  data: { annualIncome: number; current80cInvestments: number; [key: string]: any }
+): Promise<any> {
+  const payload = {
+    annualIncome: Number(data.annualIncome),
+    annual_income: Number(data.annualIncome),
+    income: Number(data.annualIncome),
+    current80cInvestments: Number(data.current80cInvestments),
+    current_80c_investments: Number(data.current80cInvestments),
+    currentInvestments: Number(data.current80cInvestments),
+  };
+
+  // Primary endpoint: /api/v1/users/tax-profile
+  // Also defensive against /api/v1/users/me/tax-profile or /api/v1/tax-profile
+  let res: Response;
+  try {
+    res = await fetch(`${BFF_URL}/api/v1/users/tax-profile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.status === 404) {
+      res = await fetch(`${BFF_URL}/api/v1/users/me/tax-profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders(token) },
+        body: JSON.stringify(payload),
+      });
+    }
+
+    if (res.status === 404) {
+      res = await fetch(`${BFF_URL}/api/v1/tax-profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders(token) },
+        body: JSON.stringify(payload),
+      });
+    }
+  } catch (err: any) {
+    throw new Error(err.message || "Failed to reach tax profile service");
+  }
+
+  if (!res.ok) {
+    let errMsg = "Failed to update tax profile";
+    try {
+      const json = await res.json();
+      errMsg =
+        json.error?.formErrors?.join(", ") ||
+        (typeof json.error === "string" ? json.error : json.message) ||
+        errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  return res.json().catch(() => ({ success: true }));
+}
+
+export async function getTaxProfile(token: string): Promise<any> {
+  try {
+    let res = await fetch(`${BFF_URL}/api/v1/users/tax-profile`, {
+      headers: authHeaders(token),
+      cache: "no-store",
+    });
+    if (res.status === 404) {
+      res = await fetch(`${BFF_URL}/api/v1/users/me/tax-profile`, {
+        headers: authHeaders(token),
+        cache: "no-store",
+      });
+    }
+    if (!res.ok) return null;
+    return res.json().catch(() => null);
+  } catch {
+    return null;
+  }
+}

@@ -15,6 +15,7 @@ const links: NavLink[] = [
   { label: "Goals", href: "/goals" },
   { label: "Documents", href: "/documents" },
   { label: "AI Advisor", href: "/advisor" },
+  { label: "Financial Plan", href: "/financial-plan" },
 ];
 
 export function Sidebar() {
