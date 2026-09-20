@@ -61,6 +61,8 @@ def parse_receipt(image_path: str) -> dict:
             "merchant": None,
             "category": "Other",
             "currency": "INR",
+            "payment_mode": None,
+            "payment_details": None,
             "confidence": 0.0,
             "raw_text": "",
         }
@@ -75,6 +77,8 @@ def parse_receipt(image_path: str) -> dict:
         "merchant": extracted.get("merchant"),
         "category": extracted.get("category") or "Other",
         "currency": extracted.get("currency") or "INR",
+        "payment_mode": extracted.get("payment_mode"),
+        "payment_details": extracted.get("payment_details"),
         "confidence": extracted.get("confidence", 0.5),
         "raw_text": raw_text,
     }

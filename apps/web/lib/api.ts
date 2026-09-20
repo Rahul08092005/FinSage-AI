@@ -237,6 +237,18 @@ export async function confirmDocument(
   return res.json();
 }
 
+export async function deleteDocument(token: string, id: string) {
+  const res = await fetch(`${BFF_URL}/api/v1/documents/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to delete document");
+  }
+  return res.json().catch(() => ({ success: true }));
+}
+
 export async function streamAdvisorChat(
   token: string,
   message: string,

@@ -120,6 +120,10 @@ def process_document(file_path: str, doc_type: str) -> dict[str, Any]:
             normalised[idx]["amount"] = None
         if idx < len(normalised) and row.get("merchant"):
             normalised[idx]["merchant"] = row["merchant"]
+        if idx < len(normalised) and row.get("payment_mode"):
+            normalised[idx]["payment_mode"] = row["payment_mode"]
+        if idx < len(normalised) and row.get("payment_details"):
+            normalised[idx]["payment_details"] = row["payment_details"]
 
     logger.info(f"[OCR] Processing completed: rows={len(normalised)}, confidence={confidence}")
 

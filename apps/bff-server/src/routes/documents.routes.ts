@@ -3,6 +3,7 @@ import path from "path";
 import { Router } from "express";
 import {
   confirmDocument,
+  deleteDocument,
   getDocument,
   listDocuments,
   uploadDocument,
@@ -30,5 +31,6 @@ router.post("/upload", upload.single("file"), uploadDocument);
 router.get("/", listDocuments);
 router.get("/:id", getDocument);
 router.post("/:id/confirm", confirmDocument);
+router.delete("/:id", deleteDocument);
 
 export default router;
