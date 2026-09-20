@@ -17,13 +17,17 @@ export async function exportReport(req: AuthedRequest, res: Response) {
   const now = new Date();
   const threeMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 3, 1));
 
-  const [transactions, budgets, goals] = await Promise.all([
+  const [transactions, budgets, goals, user] = await Promise.all([
     prisma.transaction.findMany({
       where: { userId: req.userId, transactionDate: { gte: threeMonthsAgo } },
       orderBy: { transactionDate: "desc" },
     }),
     prisma.budget.findMany({ where: { userId: req.userId } }),
     prisma.goal.findMany({ where: { userId: req.userId } }),
+    prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { monthlySalary: true },
+    }),
   ]);
 
   // --- 2. Compute budget variance (same logic as budgets.controller.ts) ------
@@ -64,6 +68,10 @@ export async function exportReport(req: AuthedRequest, res: Response) {
   }
 
   // --- 4. Call Rahul's report-generate endpoint ------------------------------
+  const queryIncome = req.query.income ? Number(req.query.income) : undefined;
+  const query80c = req.query.current80c ? Number(req.query.current80c) : (req.query.current_investments ? Number(req.query.current_investments) : undefined);
+  const incomeVal = queryIncome ?? (user?.monthlySalary ? Number(user.monthlySalary) * 12 : undefined);
+
   let markdown: string;
   try {
     const genRes = await fetch(`${AI_ENGINE_BASE}/internal/reports/generate`, {
@@ -74,6 +82,8 @@ export async function exportReport(req: AuthedRequest, res: Response) {
         budgets: budgetVariance,
         goals,
         health_score: healthScore,
+        income: incomeVal,
+        current_investments: query80c ?? 0,
       }),
     });
 

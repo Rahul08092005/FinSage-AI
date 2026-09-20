@@ -250,6 +250,92 @@ function extractDraft(data: any): EditableSmsDraft | null {
   };
 }
 
+function parseSmsClientFallback(text: string): EditableSmsDraft | null {
+  // Amount
+  const amtMatch = text.match(/(?:Rs\.?|INR|₹)\s*([\d,]+(?:\.\d{1,2})?)/i);
+  if (!amtMatch) return null;
+  const amount = amtMatch[1].replace(/,/g, "");
+
+  // Type: debit or credit
+  const isCredit = /\b(?:credited|received|deposit)\b/i.test(text);
+  const type: "debit" | "credit" = isCredit ? "credit" : "debit";
+
+  // Date
+  let dateStr = "";
+  const dateMatch =
+    text.match(/(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/i) ||
+    text.match(/(\d{1,2}[-/]\w{3}[-/]?\d{0,4})/i);
+  if (dateMatch) {
+    dateStr = dateMatch[1];
+  }
+
+  // Merchant
+  let desc = "";
+  const forMatch = text.match(
+    /(?:for|to|at|towards)\s+([A-Za-z0-9 &.'_-]{2,40}?)(?:\.\s*Ref|\s+Ref|\s+on\s+\d|\s+Txn|\s+Avail|\s*[.\-]|$)/i
+  );
+  if (forMatch) {
+    desc = forMatch[1].trim();
+  }
+  if (!desc) {
+    desc = "Bank transaction";
+  }
+
+  // Account
+  const accMatch = text.match(/(?:A\/?c|account|card)\s*[\w*X-]+/i);
+  const account = accMatch ? accMatch[0].trim() : "";
+
+  // Category
+  let category = "General";
+  const d = desc.toLowerCase();
+  if (
+    [
+      "mart",
+      "grocery",
+      "groceries",
+      "supermarket",
+      "vegetable",
+      "d-mart",
+      "bigbasket",
+      "fresh",
+    ].some((k) => d.includes(k))
+  ) {
+    category = "Groceries";
+  } else if (
+    ["zomato", "swiggy", "cafe", "restaurant", "dining", "food", "coffee"].some((k) =>
+      d.includes(k)
+    )
+  ) {
+    category = "Food & Dining";
+  } else if (["uber", "ola", "metro", "petrol", "fuel", "travel"].some((k) => d.includes(k))) {
+    category = "Travel";
+  } else if (["amazon", "flipkart", "myntra", "shopping", "zara"].some((k) => d.includes(k))) {
+    category = "Shopping";
+  } else if (["apollo", "pharmacy", "health", "hospital"].some((k) => d.includes(k))) {
+    category = "Healthcare";
+  } else if (["netflix", "hotstar", "bookmyshow", "cinema"].some((k) => d.includes(k))) {
+    category = "Entertainment";
+  } else if (["electricity", "bescom", "water", "wifi", "bill"].some((k) => d.includes(k))) {
+    category = "Utilities";
+  }
+
+  return {
+    amount,
+    type,
+    description: desc,
+    date: normalizeDateForInput(dateStr),
+    category,
+    account,
+    hasAmount: true,
+    hasType: true,
+    hasDescription: Boolean(desc),
+    hasDate: Boolean(dateStr),
+    hasCategory: true,
+    hasAccount: Boolean(account),
+    raw: { amount, description: desc, category, type },
+  };
+}
+
 export function TransactionsTable({ token }: { token: string }) {
   const [items, setItems] = useState<TransactionItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -407,8 +493,18 @@ export function TransactionsTable({ token }: { token: string }) {
     setSmsError(null);
     setIsParsingSms(true);
     try {
-      const res = await parseSms(token, trimmed);
-      const draft = extractDraft(res);
+      let draft: EditableSmsDraft | null = null;
+      try {
+        const res = await parseSms(token, trimmed);
+        draft = extractDraft(res);
+      } catch (srvErr) {
+        console.warn("Server SMS parse endpoint warning, trying fallback:", srvErr);
+      }
+
+      if (!draft) {
+        draft = parseSmsClientFallback(trimmed);
+      }
+
       if (!draft) {
         setSmsError("Couldn't recognize this message format");
         setSmsDraft(null);
@@ -417,19 +513,14 @@ export function TransactionsTable({ token }: { token: string }) {
       setSmsDraft(draft);
     } catch (err: any) {
       console.error("SMS parse error:", err);
-      const rawMsg = err?.message || "";
-      const isUnrecognized =
-        !rawMsg ||
-        rawMsg.includes("[object") ||
-        rawMsg.includes("Failed to parse SMS") ||
-        rawMsg.includes("Failed to fetch") ||
-        rawMsg.includes("404") ||
-        rawMsg.includes("500") ||
-        rawMsg.toLowerCase().includes("not recognize") ||
-        rawMsg.toLowerCase().includes("unknown format");
-
-      setSmsError(isUnrecognized ? "Couldn't recognize this message format" : rawMsg);
-      setSmsDraft(null);
+      const fallbackDraft = parseSmsClientFallback(trimmed);
+      if (fallbackDraft) {
+        setSmsDraft(fallbackDraft);
+        setSmsError(null);
+      } else {
+        setSmsError("Couldn't recognize this message format");
+        setSmsDraft(null);
+      }
     } finally {
       setIsParsingSms(false);
     }

@@ -106,3 +106,94 @@ export async function deleteTransaction(req: AuthedRequest, res: Response) {
 
   res.status(204).send();
 }
+
+const AI_ENGINE_BASE = process.env.AI_ENGINE_URL || "http://localhost:8000";
+
+export async function parseSms(req: AuthedRequest, res: Response) {
+  const smsText = req.body.smsText ?? req.body.sms_text;
+  if (!smsText || typeof smsText !== "string" || !smsText.trim()) {
+    return res.status(400).json({ error: "smsText is required" });
+  }
+
+  try {
+    const aiRes = await fetch(`${AI_ENGINE_BASE}/internal/adapters/bank-upi/parse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sms_text: smsText.trim() }),
+    });
+
+    if (!aiRes.ok) {
+      return res.status(502).json({ error: "AI engine failed to parse SMS" });
+    }
+
+    const aiData = await aiRes.json();
+    const txn = aiData.transaction;
+    if (!txn) {
+      return res.status(422).json({ error: "Couldn't recognize this message format" });
+    }
+
+    // Try to link user's account if account masked info exists
+    const accounts = await prisma.account.findMany({
+      where: { userId: req.userId },
+    });
+
+    let matchedAccountId: string | undefined = undefined;
+    let matchedAccountName: string | undefined = undefined;
+
+    if (txn.account) {
+      const match = accounts.find((a) =>
+        a.name.toLowerCase().includes(String(txn.account).toLowerCase())
+      );
+      if (match) {
+        matchedAccountId = match.id;
+        matchedAccountName = match.name;
+      }
+    }
+
+    if (!matchedAccountId && accounts.length > 0) {
+      matchedAccountId = accounts[0].id;
+      matchedAccountName = accounts[0].name;
+    }
+
+    const draft = {
+      amount: txn.amount,
+      description: txn.description,
+      category: txn.category || "General",
+      transactionDate: txn.date || new Date().toISOString().slice(0, 10),
+      type: txn.type || "debit",
+      source: "bank_sms",
+      accountId: matchedAccountId,
+      accountName: matchedAccountName,
+      confidence: aiData.confidence ?? 0.95,
+    };
+
+    return res.json({ draft, transaction: draft, confidence: draft.confidence });
+  } catch (err: any) {
+    console.error("[parseSms] error:", err.message);
+    return res.status(500).json({ error: "Internal error parsing SMS" });
+  }
+}
+
+export async function confirmSms(req: AuthedRequest, res: Response) {
+  const { amount, description, category, transactionDate, accountId } = req.body;
+  if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+    return res.status(400).json({ error: "Valid amount is required" });
+  }
+  if (!description || typeof description !== "string") {
+    return res.status(400).json({ error: "Description is required" });
+  }
+
+  const tx = await prisma.transaction.create({
+    data: {
+      userId: req.userId as string,
+      amount: Number(amount),
+      category: category || "General",
+      description: description.trim(),
+      transactionDate: transactionDate ? new Date(transactionDate) : new Date(),
+      accountId: accountId || undefined,
+      source: "bank_sms",
+    },
+  });
+
+  return res.status(201).json(tx);
+}

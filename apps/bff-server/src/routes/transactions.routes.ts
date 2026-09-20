@@ -1,7 +1,12 @@
 import multer from "multer";
 import { Router } from "express";
 import {
-  createTransaction, deleteTransaction, listTransactions, updateTransaction,
+  createTransaction,
+  deleteTransaction,
+  listTransactions,
+  updateTransaction,
+  parseSms,
+  confirmSms,
 } from "../controllers/transactions.controller";
 import { importCsv } from "../controllers/documents.controller";
 import { requireAuth } from "../middleware/auth.middleware";
@@ -14,6 +19,8 @@ const router = Router();
 router.use(requireAuth);
 router.get("/", listTransactions);
 router.post("/", createTransaction);
+router.post("/parse-sms", parseSms);
+router.post("/confirm-sms", confirmSms);
 router.patch("/:id", updateTransaction);
 router.delete("/:id", deleteTransaction);
 
