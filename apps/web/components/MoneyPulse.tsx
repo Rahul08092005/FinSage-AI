@@ -31,7 +31,7 @@ export function MoneyPulse({
   loading = false,
 }: MoneyPulseProps) {
   const moneyIn = salary ?? 100000;
-  const moneyOut = spend ?? 71816;
+  const moneyOut = spend ?? 0;
   const netSaved = Math.max(0, moneyIn - moneyOut);
   const savingsRate = moneyIn > 0 ? ((netSaved / moneyIn) * 100).toFixed(1) : "0";
 

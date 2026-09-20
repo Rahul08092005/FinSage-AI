@@ -26,7 +26,7 @@ export function DominantBalanceHero({
   const [salaryError, setSalaryError] = useState<string | null>(null);
 
   const moneyIn = salary ?? 100000;
-  const moneyOut = spend ?? 71816;
+  const moneyOut = spend ?? 0;
   const available = Math.max(0, moneyIn - moneyOut);
   const savingsRate = moneyIn > 0 ? Math.round(((moneyIn - moneyOut) / moneyIn) * 100) : 0;
   const isPositive = moneyIn >= moneyOut;

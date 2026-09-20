@@ -575,10 +575,10 @@ export function TransactionsTable({ token }: { token: string }) {
   const summaryMetrics = useMemo(() => {
     if (!items || items.length === 0) {
       return {
-        thisMonthSpent: 71816,
-        transactionCount: 24,
-        topCategoryName: "Rent",
-        topCategoryAmount: 40000,
+        thisMonthSpent: 0,
+        transactionCount: 0,
+        topCategoryName: "—",
+        topCategoryAmount: 0,
       };
     }
 

@@ -65,7 +65,7 @@ export function SpendingCharts({
     .filter((c) => Number(c.total) > 0)
     .sort((a, b) => Number(b.total) - Number(a.total));
 
-  const totalExpense = activeCategories.reduce((acc, cur) => acc + Number(cur.total), 0) || 71816;
+  const totalExpense = activeCategories.reduce((acc, cur) => acc + Number(cur.total), 0);
   const topCategories = activeCategories.slice(0, 5);
   const maxCategoryAmount = topCategories.length > 0 ? Number(topCategories[0].total) : 40000;
 
@@ -73,12 +73,12 @@ export function SpendingCharts({
   const maxTrendAmount = Math.max(...trendData.map((t) => Number(t.total) || 0), 100000);
 
   // Calculate MoM overall trend diff
-  let momDiff = "27%";
+  let momDiff = "0%";
   const currentMonthLabel = trendData[trendData.length - 1]?.month || "Current month";
   const prevMonthLabel = trendData[trendData.length - 2]?.month || "last month";
   if (trendData.length >= 2) {
-    const currTotal = trendData[trendData.length - 1]?.total || 71816;
-    const prevTotal = trendData[trendData.length - 2]?.total || 98678;
+    const currTotal = trendData[trendData.length - 1]?.total || 0;
+    const prevTotal = trendData[trendData.length - 2]?.total || 0;
     if (prevTotal > 0) {
       const diff = Math.round(((prevTotal - currTotal) / prevTotal) * 100);
       momDiff = `${Math.abs(diff)}%`;
