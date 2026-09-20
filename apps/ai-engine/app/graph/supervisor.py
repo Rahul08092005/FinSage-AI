@@ -11,7 +11,11 @@ from app.tools.analytics_tools import get_spending_summary
 from app.tools.tax_advice_tools import get_tax_savings_advice
 from app.services.llm_client import generate
 
-SPENDING_KEYWORDS = ["spent", "spending", "total", "expense", "transaction", "purchased", "cost", "spend"]
+SPENDING_KEYWORDS = [
+    "spent", "spending", "total", "expense", "transaction", "purchased", 
+    "cost", "spend", "doing", "month", "status", "overview", "summary", 
+    "finances", "money", "how am i", "health"
+]
 ANALYTICS_KEYWORDS = ["breakdown", "analytics", "distribution", "category split", "pie"]
 TAX_KEYWORDS = ["tax", "ppf", "elss", "sip", "80c", "save on taxes"]
 FINANCE_KNOWLEDGE_KEYWORDS = ["what is", "explain", "invest", "itr", "deduction", "mutual fund"]
@@ -61,51 +65,80 @@ class SupervisorAgent(BaseAgent):
             state["metrics"] = rec.get("raw_numbers", {})
             return state
 
-        # Branch 2: Budgeting recommendation
+        # Branch 3: Budgeting recommendation
         if any(kw in msg_lower for kw in BUDGET_KEYWORDS):
             tx_data = state.get("transactions_json") or ""
             rec = get_budget_recommendation.invoke({"transactions_json": tx_data})
-            prompt = "User request: " + str(message) + "\nBudget Recommendations: " + str(rec) + "\nProvide actionable budget advice."
-            answer = generate(prompt, system="You are the Budget Advisor Agent for FinSage AI.")
+            prompt = "User request: " + str(message) + "\nBudget Recommendations: " + str(rec) + "\nProvide actionable budget advice in INR (₹)."
+            answer = generate(
+                prompt,
+                system=(
+                    "You are the Budget Advisor Agent for FinSage AI in India. "
+                    "All currency figures are in Indian Rupees (INR, ₹). Always format currency with ₹. "
+                    "Provide actionable, direct, and encouraging advice."
+                ),
+            )
             state["answer"] = answer
             state["agent_path"].append("budgeting_tool")
             state["citations"] = []
             return state
 
-        # Branch 3: Goal tracking
+        # Branch 4: Goal tracking
         if any(kw in msg_lower for kw in GOAL_KEYWORDS):
             goals_json = state.get("goals_json") or "[]"
             tx_data = state.get("transactions_json") or ""
             progress = track_goal_progress.invoke({"goals_json": goals_json, "transactions_json": tx_data})
-            prompt = "User request: " + str(message) + "\nGoal Progress: " + str(progress) + "\nProvide motivating goal tracking insight."
-            answer = generate(prompt, system="You are the Financial Goal Tracking Agent for FinSage AI.")
+            prompt = "User request: " + str(message) + "\nGoal Progress: " + str(progress) + "\nProvide motivating goal tracking insight in INR (₹)."
+            answer = generate(
+                prompt,
+                system=(
+                    "You are the Financial Goal Tracking Agent for FinSage AI in India. "
+                    "All currency figures are in Indian Rupees (INR, ₹). Always format currency with ₹. "
+                    "Provide motivating goal tracking insight."
+                ),
+            )
             state["answer"] = answer
             state["agent_path"].append("goal_tool")
             state["citations"] = []
             return state
 
-        # Branch 4: Analytics (category breakdown)
+        # Branch 5: Analytics (category breakdown)
         if any(kw in msg_lower for kw in ANALYTICS_KEYWORDS) and state.get("transactions_json"):
             agent = AnalyticsAgent()
             return agent.run(state)
 
-        # Branch 5: Expense summary
+        # Branch 6: Expense summary
         if any(kw in msg_lower for kw in SPENDING_KEYWORDS):
             if state.get("transactions_json"):
                 agent = ExpenseAgent()
                 return agent.run(state)
 
-        # Branch 6: RAG Advisor when finance knowledge query and no transactions_json
+        # Branch 7: RAG Advisor when finance knowledge query and no transactions_json
         if any(kw in msg_lower for kw in FINANCE_KNOWLEDGE_KEYWORDS) and not state.get("transactions_json"):
             agent = RAGAdvisorAgent()
             return agent.run(state)
 
-        # Default fallback: Supervisor direct LLM response
+        # Default fallback: Supervisor direct LLM response grounded in real transactions
+        summary = ""
+        if state.get("transactions_json"):
+            try:
+                from app.tools.analytics_tools import get_spending_summary
+                summary_data = get_spending_summary.invoke({"transactions_json": state.get("transactions_json")})
+                summary = f"Current User Financial Data: {summary_data}\n"
+            except Exception:
+                pass
+
+        fallback_prompt = (
+            f"{summary}User query: {message}\n"
+            "Answer the user directly and helpfully based on their current numbers in Indian Rupees (INR, ₹)."
+        )
         answer = generate(
-            prompt=message,
+            prompt=fallback_prompt,
             system=(
-                "You are the FinSage AI supervisor agent. "
-                "Provide a helpful financial assistant response."
+                "You are the FinSage AI supervisor agent in India. "
+                "All currency figures are in Indian Rupees (INR, ₹). Always format currency as ₹ with Indian numbering (e.g. ₹1,850, ₹10,000, ₹1,00,000). "
+                "Never use USD or dollar signs ($). "
+                "Provide a helpful, direct financial assistant response grounded in the user's actual data."
             ),
         )
         state["answer"] = answer

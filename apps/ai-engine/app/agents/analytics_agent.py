@@ -21,9 +21,18 @@ class AnalyticsAgent(BaseAgent):
         prompt = (
             "User request: " + str(message) + "\n"
             "Category Breakdown Data: " + str(breakdown) + "\n"
-            "Explain the user's spending distribution across categories clearly with recommendations."
+            "Explain the user's spending distribution across categories clearly and directly with recommendations."
         )
-        answer = generate(prompt, system="You are the Analytics Specialist Agent for FinSage AI.")
+        answer = generate(
+            prompt,
+            system=(
+                "You are the Analytics Specialist Agent for FinSage AI in India. "
+                "All currency figures are in Indian Rupees (INR, ₹). "
+                "Always format currency as ₹ with Indian numbering (e.g. ₹1,850, ₹10,000, ₹1,00,000). "
+                "Never use dollar signs ($) or USD. "
+                "Directly and accurately answer the user's specific questions based on their real financial numbers."
+            ),
+        )
 
         state["answer"] = answer
         state.setdefault("agent_path", []).append(self.name)

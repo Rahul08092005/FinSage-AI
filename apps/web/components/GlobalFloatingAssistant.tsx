@@ -188,14 +188,16 @@ export function GlobalFloatingAssistant({ token }: { token: string }) {
         },
         (err) => {
           console.error("Floating assistant error:", err);
+          const errorMsg =
+            err?.message && !err.message.includes("[object")
+              ? err.message
+              : "Unable to connect to FinSage AI Advisor. Please ensure the AI engine service is running.";
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assistantMsgId
                 ? {
                     ...msg,
-                    content:
-                      msg.content ||
-                      "Based on your recent numbers, September spending is currently at ₹71,816 with Rent being your largest allocation (₹40,000). You have ₹28,184 remaining this month.",
+                    content: msg.content || errorMsg,
                   }
                 : msg
             )
