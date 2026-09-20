@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { streamAdvisorChat } from "@/lib/api";
+import { FormattedMessage } from "./FormattedMessage";
 
 interface Message {
   id: string;
@@ -297,14 +298,18 @@ export function GlobalFloatingAssistant({ token }: { token: string }) {
                 className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
               >
                 <div
-                  className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-xs leading-relaxed ${
+                  className={`rounded-2xl px-3.5 py-2 text-xs leading-relaxed ${
                     m.role === "user"
-                      ? "bg-[#18122B] text-white rounded-br-xs shadow-xs font-medium"
-                      : "bg-white border border-[#E5DAC4] text-[#18122B] rounded-bl-xs shadow-xs font-medium"
+                      ? "max-w-[85%] bg-[#18122B] text-white rounded-br-xs shadow-xs font-medium"
+                      : "max-w-[95%] bg-white border border-[#E5DAC4] text-[#18122B] rounded-bl-xs shadow-xs"
                   }`}
                 >
                   {m.content ? (
-                    <div className="whitespace-pre-wrap">{m.content}</div>
+                    m.role === "assistant" ? (
+                      <FormattedMessage content={m.content} />
+                    ) : (
+                      <div className="whitespace-pre-wrap">{m.content}</div>
+                    )
                   ) : (
                     <div className="flex items-center gap-1 py-1">
                       <span className="h-1.5 w-1.5 rounded-full bg-[#84cc16] animate-bounce" />

@@ -318,8 +318,8 @@ export async function streamAdvisorChat(
             if (Array.isArray(parsed.citations) && parsed.citations.length > 0) {
               onCitations?.(parsed.citations);
             }
-            if (parsed.token) {
-              onChunk(parsed.token);
+            if (parsed.token !== undefined && parsed.token !== null) {
+              onChunk(String(parsed.token));
               continue;
             }
             if (parsed.answer) {
