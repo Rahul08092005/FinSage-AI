@@ -16,8 +16,13 @@ const defaultINRFormatter = new Intl.NumberFormat("en-IN", {
  * - formatINR(1250000) -> "₹12,50,000"
  * - formatINR(10000000) -> "₹1,00,00,000"
  */
-export function formatINR(amount: number, options?: FormatINROptions): string {
-  if (typeof amount !== "number" || isNaN(amount)) {
+export function formatINR(amount: number | string | null | undefined, options?: FormatINROptions): string {
+  if (amount === null || amount === undefined || amount === "") {
+    return "";
+  }
+
+  const num = typeof amount === "number" ? amount : Number(amount);
+  if (isNaN(num)) {
     return "";
   }
 
@@ -27,8 +32,8 @@ export function formatINR(amount: number, options?: FormatINROptions): string {
       currency: "INR",
       maximumFractionDigits: options.maximumFractionDigits ?? 0,
       minimumFractionDigits: options.minimumFractionDigits ?? 0,
-    }).format(amount);
+    }).format(num);
   }
 
-  return defaultINRFormatter.format(amount);
+  return defaultINRFormatter.format(num);
 }

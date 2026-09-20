@@ -314,7 +314,12 @@ export function TransactionsTable({ token }: { token: string }) {
     setLoading(true);
     try {
       const data = await getTransactions(token, 100);
-      setItems(data.items || []);
+      const raw = data.items || [];
+      const normalized = raw.map((i: any) => ({
+        ...i,
+        amount: Number(i.amount || 0),
+      }));
+      setItems(normalized);
     } catch (e) {
       console.error("Failed to load transactions:", e);
     } finally {
