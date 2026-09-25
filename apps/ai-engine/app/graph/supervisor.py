@@ -5,6 +5,7 @@ from app.agents.document_agent import DocumentAgent
 from app.agents.expense_agent import ExpenseAgent
 from app.agents.analytics_agent import AnalyticsAgent
 from app.agents.rag_advisor_agent import RAGAdvisorAgent
+from app.agents.guru_agent import GuruAgent
 from app.tools.budgeting_tools import get_budget_recommendation
 from app.tools.goal_tools import track_goal_progress
 from app.tools.analytics_tools import get_spending_summary
@@ -18,6 +19,11 @@ SPENDING_KEYWORDS = [
 ]
 ANALYTICS_KEYWORDS = ["breakdown", "analytics", "distribution", "category split", "pie"]
 TAX_KEYWORDS = ["tax", "ppf", "elss", "sip", "80c", "save on taxes"]
+GURU_KEYWORDS = [
+    "guru", "compare philosophy", "buffett", "munger", "bogle",
+    "graham", "lynch", "dalio", "marks", "fisher",
+    "investment philosophy", "which investor", "philosophy", "investor philosophy"
+]
 FINANCE_KNOWLEDGE_KEYWORDS = ["what is", "explain", "invest", "itr", "deduction", "mutual fund"]
 BUDGET_KEYWORDS = ["budget", "recommend", "how much should i spend", "limit", "target spend"]
 GOAL_KEYWORDS = ["goal", "saving for", "progress", "target date", "save"]
@@ -87,7 +93,13 @@ class SupervisorAgent(BaseAgent):
         if any(kw in msg_lower for kw in GOAL_KEYWORDS):
             goals_json = state.get("goals_json") or "[]"
             tx_data = state.get("transactions_json") or ""
-            progress = track_goal_progress.invoke({"goals_json": goals_json, "transactions_json": tx_data})
+            income = state.get("income") or state.get("total_income")
+            monthly_salary = (float(income) / 12.0) if income else None
+            progress = track_goal_progress.invoke({
+                "goals_json": goals_json,
+                "transactions_json": tx_data,
+                "monthly_salary": monthly_salary,
+            })
             prompt = "User request: " + str(message) + "\nGoal Progress: " + str(progress) + "\nProvide motivating goal tracking insight in INR (₹)."
             answer = generate(
                 prompt,
@@ -113,10 +125,16 @@ class SupervisorAgent(BaseAgent):
                 agent = ExpenseAgent()
                 return agent.run(state)
 
-        # Branch 7: RAG Advisor when finance knowledge query and no transactions_json
+        # Branch 7: Multi-Guru financial philosophy comparison
+        if state.get("domain") == "guru_philosophy" or any(kw in msg_lower for kw in GURU_KEYWORDS):
+            agent = GuruAgent()
+            return agent.run(state)
+
+        # Branch 8: RAG Advisor when finance knowledge query and no transactions_json
         if any(kw in msg_lower for kw in FINANCE_KNOWLEDGE_KEYWORDS) and not state.get("transactions_json"):
             agent = RAGAdvisorAgent()
             return agent.run(state)
+
 
         # Default fallback: Supervisor direct LLM response grounded in real transactions
         summary = ""

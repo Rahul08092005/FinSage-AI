@@ -31,10 +31,12 @@ def search_domain(domain: str, query: str, top_k: int = 3) -> List[Dict[str, Any
     """Embeds query and retrieves top_k similar chunks in specified domain."""
     query_vec = embed_text(query)
     results = search_similar(domain=domain, query_embedding=query_vec, top_k=top_k)
-    if not results:
+    matching = [r for r in results if r.get("domain") == domain]
+    if not matching:
         seed_demo_knowledge()
         results = search_similar(domain=domain, query_embedding=query_vec, top_k=top_k)
-    return results
+        matching = [r for r in results if r.get("domain") == domain]
+    return matching if matching else results
 
 
 def seed_indian_tax_knowledge() -> Dict[str, Any]:
@@ -85,9 +87,64 @@ def seed_indian_tax_knowledge() -> Dict[str, Any]:
     return {"status": "success", "domain": "indian_tax_finance", "chunks_stored": c1 + c2 + c3 + c4}
 
 
+def seed_guru_philosophy_knowledge() -> Dict[str, Any]:
+    """Ingests comprehensive financial wisdom and distinct investor philosophies
+    into the 'guru_philosophy' domain (Buffett, Munger, Bogle, Graham, Lynch, Dalio, Marks).
+    """
+    buffett_munger_content = (
+        "Warren Buffett and Charlie Munger champion value investing focused on buying wonderful businesses "
+        "with durable economic moats at fair prices, rather than fair businesses at wonderful prices. Buffett "
+        "and Munger advocate holding high-return-on-capital companies for the ultra-long term ('our favorite "
+        "holding period is forever'), staying strictly within one's circle of competence, and avoiding speculative "
+        "fads or leverage. Charlie Munger emphasizes mental models, worldly wisdom, and inversion—avoiding stupidity "
+        "consistently rather than trying to be brilliant."
+    )
+
+    bogle_content = (
+        "John Bogle, founder of Vanguard, pioneered low-cost index investing and the mathematics of relentless "
+        "cost minimization. Bogle argued that attempting to beat the market or time macroeconomic cycles is a loser's "
+        "game for the vast majority of investors due to compounding management fees, brokerage commissions, and "
+        "tax turnover. Instead, Bogle advises owning the entire market through broad-market index funds, capturing "
+        "aggregate economic compounding, reinvesting dividends, and tuning out short-term market noise."
+    )
+
+    graham_content = (
+        "Benjamin Graham, the father of modern value investing and mentor to Warren Buffett, established the core "
+        "doctrine of Margin of Safety. Graham taught that price is what you pay, while value is what you get. "
+        "Disciplined investors must view equities as fractional stakes in real businesses, maintain strict emotional "
+        "detachment from 'Mr. Market's' volatile daily mood swings, and invest with a substantial safety buffer "
+        "below conservative intrinsic business value to preserve principal capital."
+    )
+
+    lynch_content = (
+        "Peter Lynch, renowned manager of the Fidelity Magellan Fund, championed Growth at a Reasonable Price (GARP) "
+        "and the philosophy of 'invest in what you know.' Lynch urges retail investors to leverage their practical "
+        "firsthand consumer observations to discover emerging business winners before institutional analysts. He "
+        "emphasizes checking balance sheets, ensuring debt is manageable, validating that the P/E ratio is justified by "
+        "the growth rate (PEG ratio), and holding tenaciously onto multi-baggers."
+    )
+
+    dalio_marks_content = (
+        "Ray Dalio and Howard Marks focus on market cycles, risk mitigation, and second-level thinking. Ray Dalio's "
+        "All-Weather philosophy advocates strategic asset allocation balancing uncorrelated asset classes (equities, "
+        "bonds, commodities, gold) across distinct economic regimes of growth and inflation. Howard Marks teaches "
+        "that outstanding investment performance is achieved through superior risk control and understanding cyclical "
+        "pendulums, rather than chasing high returns through aggressive, unhedged risk-taking."
+    )
+
+    c1 = ingest_text("guru_philosophy", buffett_munger_content)
+    c2 = ingest_text("guru_philosophy", bogle_content)
+    c3 = ingest_text("guru_philosophy", graham_content)
+    c4 = ingest_text("guru_philosophy", lynch_content)
+    c5 = ingest_text("guru_philosophy", dalio_marks_content)
+
+    return {"status": "success", "domain": "guru_philosophy", "chunks_stored": c1 + c2 + c3 + c4 + c5}
+
+
 def seed_demo_knowledge() -> Dict[str, Any]:
-    """Ingests short hardcoded knowledge paragraphs into financial_knowledge
-    and comprehensive knowledge into indian_tax_finance for demo retrieval.
+    """Ingests short hardcoded knowledge paragraphs into financial_knowledge,
+    comprehensive knowledge into indian_tax_finance, and distinct investor philosophies
+    into guru_philosophy for demo retrieval.
     """
     fk_content_1 = (
         "The 50/30/20 budget rule suggests allocating 50% of net income to needs, "
@@ -103,6 +160,9 @@ def seed_demo_knowledge() -> Dict[str, Any]:
     c1 = ingest_text("financial_knowledge", fk_content_1)
     c2 = ingest_text("financial_knowledge", fk_content_2)
     tax_result = seed_indian_tax_knowledge()
+    guru_result = seed_guru_philosophy_knowledge()
 
-    total_chunks = c1 + c2 + tax_result.get("chunks_stored", 0)
+    total_chunks = (
+        c1 + c2 + tax_result.get("chunks_stored", 0) + guru_result.get("chunks_stored", 0)
+    )
     return {"status": "success", "chunks_stored": total_chunks}

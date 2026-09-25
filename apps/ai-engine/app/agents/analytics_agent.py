@@ -10,6 +10,15 @@ class AnalyticsAgent(BaseAgent):
         tx_data = state.get("transactions_json", "")
         message = state.get("message", "Analyze spending categories")
 
+        if isinstance(tx_data, str) and tx_data.strip():
+            try:
+                import json
+                parsed = json.loads(tx_data)
+                if isinstance(parsed, list):
+                    tx_data = parsed
+            except Exception:
+                pass
+
         try:
             from app.analytics.spending import calculate_category_breakdown
             breakdown = calculate_category_breakdown(tx_data)
