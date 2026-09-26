@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
+import { FormattedMessage } from "./FormattedMessage";
 
 export interface GuruPerspective {
   title: string;
@@ -72,17 +73,15 @@ function buildPerspective(rawTitle: string, rawContent: string): GuruPerspective
     tag = "THE GROWTH PLAY";
   }
 
-  // Extract key recommendation sentence if available
-  const sentences = rawContent.split(/(?<=[.?!])\s+/).filter(Boolean);
-  const recommendation = sentences[0] || rawTitle;
-  const content = sentences.slice(1).join(" ") || rawContent;
+  // Keep raw markdown content intact for FormattedMessage to render lists, tables and bolding
+  const trimmed = rawContent.trim();
 
   return {
     title: rawTitle,
     tag,
     style,
-    recommendation,
-    content,
+    recommendation: "",
+    content: trimmed,
   };
 }
 
@@ -148,16 +147,18 @@ export function AdvisorResponseView({ content, isStreaming = false, mode = "advi
                       {p.title}
                     </h4>
 
-                    <div className="mt-2 rounded-xl bg-white/80 border border-stone-200/60 p-2.5">
-                      <p className="text-xs font-semibold text-[#18122B] leading-snug">
-                        {p.recommendation}
-                      </p>
-                    </div>
+                    {p.recommendation ? (
+                      <div className="mt-2 rounded-xl bg-white/80 border border-stone-200/60 p-2.5">
+                        <p className="text-xs font-semibold text-[#18122B] leading-snug">
+                          {p.recommendation}
+                        </p>
+                      </div>
+                    ) : null}
 
                     {p.content && (
-                      <p className="mt-2 text-xs text-stone-600 leading-relaxed">
-                        {p.content}
-                      </p>
+                      <div className="mt-2.5 text-xs text-stone-700 leading-relaxed">
+                        <FormattedMessage content={p.content} />
+                      </div>
                     )}
                   </div>
                 </div>
@@ -176,8 +177,8 @@ export function AdvisorResponseView({ content, isStreaming = false, mode = "advi
             </div>
           )}
 
-          <div className="text-xs sm:text-sm text-[#18122B] leading-relaxed whitespace-pre-wrap font-sans">
-            {content}
+          <div className="text-xs sm:text-sm text-[#18122B] leading-relaxed font-sans">
+            <FormattedMessage content={content} />
             {isStreaming && (
               <span className="ml-1 inline-block h-3.5 w-1 animate-pulse bg-lime-500 align-middle rounded-xs" />
             )}

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo } from "react";
-import { confirmDocument, getDocuments, getDocumentStatus, uploadDocument } from "@/lib/api";
+import { confirmDocument, deleteDocument, getDocuments, getDocumentStatus, uploadDocument } from "@/lib/api";
+import { formatINR } from "@/lib/formatCurrency";
 
 const CATEGORIES = ["Food", "Transport", "Shopping", "Bills", "Entertainment", "Other"];
 
@@ -63,6 +64,19 @@ interface EditableTransactionRow {
   category: string;
   transactionDate: string;
   accountId?: string;
+  paymentMode?: string;
+}
+
+export function getDocumentPaymentInfo(doc: any): { mode: string | null; details: string | null } {
+  if (!doc) return { mode: null, details: null };
+  const first = Array.isArray(doc.extractedJson) && doc.extractedJson.length > 0
+    ? doc.extractedJson[0]
+    : typeof doc.extractedJson === "object"
+    ? doc.extractedJson
+    : null;
+  const mode = doc.payment_mode || doc.paymentMode || first?.payment_mode || first?.paymentMode || null;
+  const details = doc.payment_details || doc.paymentDetails || first?.payment_details || first?.paymentDetails || null;
+  return { mode, details };
 }
 
 export function DocumentUpload({ token }: { token: string }) {
@@ -90,6 +104,8 @@ export function DocumentUpload({ token }: { token: string }) {
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewSuccess, setReviewSuccess] = useState<string | null>(null);
   const [expandedErrors, setExpandedErrors] = useState<Record<string, boolean>>({});
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   function stopPolling() {
     if (pollIntervalRef.current) {
@@ -146,6 +162,7 @@ export function DocumentUpload({ token }: { token: string }) {
       }];
     }
 
+    const docPm = getDocumentPaymentInfo(doc).mode || undefined;
     if (rawList.length > 0) {
       setReviewRows(
         rawList.map((r) => ({
@@ -156,6 +173,7 @@ export function DocumentUpload({ token }: { token: string }) {
             ? new Date(r.transactionDate || r.transaction_date || r.date).toISOString().slice(0, 10)
             : new Date().toISOString().slice(0, 10),
           accountId: r.accountId,
+          paymentMode: r.payment_mode || r.paymentMode || docPm,
         }))
       );
     } else {
@@ -165,6 +183,7 @@ export function DocumentUpload({ token }: { token: string }) {
           description: doc.merchant || doc.description || doc.title.replace(/\.[^/.]+$/, ""),
           category: doc.category && CATEGORIES.includes(doc.category) ? doc.category : "Food",
           transactionDate: doc.date || new Date().toISOString().slice(0, 10),
+          paymentMode: docPm,
         },
       ]);
     }
@@ -322,13 +341,20 @@ export function DocumentUpload({ token }: { token: string }) {
     setReviewError(null);
 
     try {
-      const formatted = reviewRows.map((r) => ({
-        amount: parseFloat(String(r.amount)),
-        category: r.category || "Other",
-        transactionDate: new Date(r.transactionDate || Date.now()).toISOString(),
-        description: r.description.trim(),
-        accountId: r.accountId,
-      }));
+      const formatted = reviewRows.map((r) => {
+        let desc = r.description.trim();
+        if (r.paymentMode && !desc.toLowerCase().includes(r.paymentMode.toLowerCase())) {
+          desc = `${desc} (${r.paymentMode})`;
+        }
+        return {
+          amount: parseFloat(String(r.amount)),
+          category: r.category || "Other",
+          transactionDate: new Date(r.transactionDate || Date.now()).toISOString(),
+          description: desc,
+          accountId: r.accountId,
+          paymentMode: r.paymentMode,
+        };
+      });
 
       await confirmDocument(token, inspectDoc.id, formatted);
       setReviewSuccess("Transactions reconciled & recorded in ledger.");
@@ -348,6 +374,40 @@ export function DocumentUpload({ token }: { token: string }) {
     } finally {
       setConfirming(false);
     }
+  }
+
+  async function handleDeleteDoc(id: string, e?: React.MouseEvent) {
+    if (e) {
+      e.stopPropagation();
+    }
+
+    if (confirmDeleteId !== id) {
+      setConfirmDeleteId(id);
+      return;
+    }
+
+    setDeletingId(id);
+    try {
+      await deleteDocument(token, id);
+      setDocuments((prev) => prev.filter((d) => d.id !== id));
+      if (inspectDoc && inspectDoc.id === id) {
+        setInspectDoc(null);
+      }
+      if (currentDoc && currentDoc.id === id) {
+        setCurrentDoc(null);
+        stopPolling();
+      }
+      setConfirmDeleteId(null);
+    } catch (err: any) {
+      alert(err.message || "Failed to delete document");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function handleCancelDelete(e?: React.MouseEvent) {
+    if (e) e.stopPropagation();
+    setConfirmDeleteId(null);
   }
 
   // Vault Summary Stats
@@ -697,6 +757,7 @@ export function DocumentUpload({ token }: { token: string }) {
               const dError = getDocumentError(d);
               const isLongError = Boolean(dError && dError.length > 90);
               const isExpandedError = Boolean(expandedErrors[d.id]);
+              const dPm = getDocumentPaymentInfo(d);
 
               return (
                 <div
@@ -704,20 +765,60 @@ export function DocumentUpload({ token }: { token: string }) {
                   onClick={() => handleOpenDoc(d)}
                   className="group relative flex flex-col justify-between rounded-[22px] border border-stone-200/80 bg-[#FFFDF8] p-4 sm:p-5 shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-xl hover:border-stone-300 cursor-pointer overflow-hidden"
                 >
-                  {/* Card Top: Icon, DocType Badge, Upload Date */}
+                  {/* Card Top: Icon, DocType Badge, Payment Badge, Upload Date */}
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-3">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xl p-1.5 rounded-xl bg-stone-100 shadow-2xs">
                           {info.icon}
                         </span>
                         <span className="text-[10px] font-bold tracking-wider uppercase text-stone-400">
                           {info.badge}
                         </span>
+                        {dPm.mode && (
+                          <span className="text-[9px] font-extrabold tracking-wider uppercase bg-emerald-100/90 text-emerald-800 border border-emerald-200/80 px-1.5 py-0.5 rounded-md">
+                            💳 {dPm.mode}
+                          </span>
+                        )}
                       </div>
-                      <span className="text-[10px] font-semibold text-stone-400 uppercase">
-                        {formattedDate}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-semibold text-stone-400 uppercase">
+                          {formattedDate}
+                        </span>
+                        {confirmDeleteId === d.id ? (
+                          <div
+                            className="flex items-center gap-1 z-10"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteDoc(d.id, e)}
+                              disabled={deletingId === d.id}
+                              className="rounded-full bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold px-2 py-0.5 shadow-sm transition"
+                            >
+                              {deletingId === d.id ? "…" : "Confirm"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => handleCancelDelete(e)}
+                              className="rounded-full bg-stone-200 hover:bg-stone-300 text-stone-700 text-[10px] font-medium px-1.5 py-0.5 transition"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            title="Delete document"
+                            onClick={(e) => handleDeleteDoc(d.id, e)}
+                            className="p-1 text-stone-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition z-10 opacity-70 group-hover:opacity-100"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Document Title */}
@@ -825,30 +926,47 @@ export function DocumentUpload({ token }: { token: string }) {
             </div>
 
             {/* Modal Metadata Snapshot */}
-            <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3 rounded-2xl bg-white p-3.5 border border-stone-200/70">
-              <div>
-                <span className="text-[10px] font-bold text-stone-400 uppercase">TYPE</span>
-                <p className="text-xs font-semibold text-[#18122B] uppercase mt-0.5">
-                  {inspectDoc.docType.replace("_", " ")}
-                </p>
-              </div>
-              <div>
-                <span className="text-[10px] font-bold text-stone-400 uppercase">DEPOSITED</span>
-                <p className="text-xs font-semibold text-[#18122B] mt-0.5">
-                  {new Date(inspectDoc.uploadedAt).toLocaleDateString("en-IN", {
-                    day: "2-digit",
-                    month: "short",
-                    year: "numeric",
-                  })}
-                </p>
-              </div>
-              <div>
-                <span className="text-[10px] font-bold text-stone-400 uppercase">OCR CONFIDENCE</span>
-                <div className="mt-0.5">
-                  {renderConfidenceMeter(inspectDoc.confidence, inspectDoc.status)}
+            {(() => {
+              const modalPm = getDocumentPaymentInfo(inspectDoc);
+              return (
+                <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-2xl bg-white p-3.5 border border-stone-200/70">
+                  <div>
+                    <span className="text-[10px] font-bold text-stone-400 uppercase">TYPE</span>
+                    <p className="text-xs font-semibold text-[#18122B] uppercase mt-0.5">
+                      {inspectDoc.docType.replace("_", " ")}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-stone-400 uppercase">DEPOSITED</span>
+                    <p className="text-xs font-semibold text-[#18122B] mt-0.5">
+                      {new Date(inspectDoc.uploadedAt).toLocaleDateString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-stone-400 uppercase">OCR CONFIDENCE</span>
+                    <div className="mt-0.5">
+                      {renderConfidenceMeter(inspectDoc.confidence, inspectDoc.status)}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-stone-400 uppercase">PAYMENT MODE</span>
+                    <p className="text-xs font-semibold text-[#18122B] mt-0.5 truncate">
+                      {modalPm.mode ? (
+                        <span className="inline-flex items-center gap-1 text-emerald-800 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md font-bold text-[11px]">
+                          💳 {modalPm.mode} {modalPm.details ? `(${modalPm.details})` : ""}
+                        </span>
+                      ) : (
+                        <span className="text-stone-400 font-normal italic text-[11px]">Not detected</span>
+                      )}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </div>
+              );
+            })()}
 
             {/* Extracted Transactions Editor / Auditor */}
             <div className="mt-4">
@@ -940,15 +1058,29 @@ export function DocumentUpload({ token }: { token: string }) {
                                 </td>
                                 <td className="py-2 px-3">
                                   {isReviewable ? (
-                                    <input
-                                      type="text"
-                                      placeholder="Description"
-                                      className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs text-[#18122B] focus:border-[#18122B] focus:outline-none"
-                                      value={row.description}
-                                      onChange={(e) => handleRowChange(idx, "description", e.target.value)}
-                                    />
+                                    <div className="space-y-1">
+                                      <input
+                                        type="text"
+                                        placeholder="Description"
+                                        className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs text-[#18122B] focus:border-[#18122B] focus:outline-none"
+                                        value={row.description}
+                                        onChange={(e) => handleRowChange(idx, "description", e.target.value)}
+                                      />
+                                      {row.paymentMode && (
+                                        <div className="flex items-center gap-1 text-[10px] text-emerald-700 font-semibold">
+                                          <span>💳 Mode: {row.paymentMode}</span>
+                                        </div>
+                                      )}
+                                    </div>
                                   ) : (
-                                    <span className="font-medium text-[#18122B]">{row.description}</span>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-medium text-[#18122B]">{row.description}</span>
+                                      {row.paymentMode && (
+                                        <span className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-emerald-100/80 text-emerald-800 border border-emerald-200/70">
+                                          💳 {row.paymentMode}
+                                        </span>
+                                      )}
+                                    </div>
                                   )}
                                 </td>
                                 <td className="py-2 px-3">
@@ -1000,7 +1132,7 @@ export function DocumentUpload({ token }: { token: string }) {
                                     </span>
                                   ) : (
                                     <span className="font-serif font-bold text-[#18122B] tabular-nums">
-                                      ₹ {Number(row.amount).toLocaleString("en-IN")}
+                                      {formatINR(Number(row.amount))}
                                     </span>
                                   )}
                                 </td>
@@ -1041,13 +1173,46 @@ export function DocumentUpload({ token }: { token: string }) {
 
             {/* Modal Actions */}
             <div className="mt-5 flex items-center justify-between pt-3 border-t border-stone-200/80">
-              <button
-                type="button"
-                onClick={() => setInspectDoc(null)}
-                className="rounded-full border border-stone-300 bg-white px-4 py-2 text-xs font-semibold text-stone-600 hover:bg-stone-50 transition cursor-pointer"
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setInspectDoc(null)}
+                  className="rounded-full border border-stone-300 bg-white px-4 py-2 text-xs font-semibold text-stone-600 hover:bg-stone-50 transition cursor-pointer"
+                >
+                  Close
+                </button>
+
+                {confirmDeleteId === inspectDoc.id ? (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteDoc(inspectDoc.id)}
+                      disabled={deletingId === inspectDoc.id}
+                      className="rounded-full bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-3 py-2 shadow-sm transition cursor-pointer"
+                    >
+                      {deletingId === inspectDoc.id ? "Deleting…" : "Confirm Delete"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="rounded-full border border-stone-200 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-medium px-3 py-2 transition cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteId(inspectDoc.id)}
+                    className="rounded-full border border-rose-200 bg-rose-50/70 hover:bg-rose-100 text-rose-700 px-3 py-2 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    <span>Delete</span>
+                  </button>
+                )}
+              </div>
 
               {(inspectDoc.status === "NEEDS_REVIEW" || inspectDoc.status === "FAILED") && (
                 <button

@@ -1,5 +1,7 @@
 "use client";
 
+import { formatINR } from "@/lib/formatCurrency";
+
 interface CategoryItem {
   category: string;
   total: number;
@@ -29,7 +31,7 @@ export function MoneyPulse({
   loading = false,
 }: MoneyPulseProps) {
   const moneyIn = salary ?? 100000;
-  const moneyOut = spend ?? 71816;
+  const moneyOut = spend ?? 0;
   const netSaved = Math.max(0, moneyIn - moneyOut);
   const savingsRate = moneyIn > 0 ? ((netSaved / moneyIn) * 100).toFixed(1) : "0";
 
@@ -76,7 +78,7 @@ export function MoneyPulse({
 
           <div className="mt-4">
             <p className="font-serif text-3xl font-black tracking-tight text-[#18122B] tabular-nums">
-              ₹ {moneyOut.toLocaleString("en-IN")}
+              {formatINR(moneyOut)}
             </p>
             <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-[#C2410C]">
               {momDiffPercent !== null && (
@@ -104,7 +106,7 @@ export function MoneyPulse({
               {topCategory.category}
             </p>
             <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-[#6D28D9]">
-              <span>₹ {Number(topCategory.total).toLocaleString("en-IN")}</span>
+              <span>{formatINR(Number(topCategory.total))}</span>
               <span className="text-[#18122B]/40">•</span>
               <span className="text-[11px] text-[#18122B]/70 font-medium">{topCategoryPercent}% of budget</span>
             </div>
@@ -122,7 +124,7 @@ export function MoneyPulse({
 
           <div className="mt-4">
             <p className="font-serif text-3xl font-black tracking-tight text-[#18122B] tabular-nums">
-              ₹ {moneyIn.toLocaleString("en-IN")}
+              {formatINR(moneyIn)}
             </p>
             <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-[#3f6212]">
               <span>Salary credit verified</span>
@@ -146,7 +148,7 @@ export function MoneyPulse({
               +{savingsRate}%
             </p>
             <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-[#1D4ED8]">
-              <span>₹ {netSaved.toLocaleString("en-IN")} retained</span>
+              <span>{formatINR(netSaved)} retained</span>
               <span className="text-[#18122B]/40">•</span>
               <span className="text-[11px] text-[#18122B]/70 font-medium">Top quartile</span>
             </div>

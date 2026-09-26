@@ -49,11 +49,12 @@ export async function processJob(job: DocumentJob): Promise<void> {
   });
 
   try {
+    const absoluteFilePath = path.resolve(filePath);
     // 2. Call AI Engine OCR/extraction endpoint
     const aiRes = await fetch(`${AI_ENGINE_BASE}/internal/documents/process`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file_path: filePath, doc_type: docType }),
+      body: JSON.stringify({ file_path: absoluteFilePath, doc_type: docType }),
     });
 
     if (!aiRes.ok) {
@@ -84,7 +85,35 @@ export async function processJob(job: DocumentJob): Promise<void> {
     if (isConfident && hasValidAmount && !createdTransactionId) {
       try {
         const txDate = firstTx.date || firstTx.transactionDate ? new Date(firstTx.date || firstTx.transactionDate) : new Date();
-        const description = (firstTx.merchant || firstTx.description || doc.title).slice(0, 500);
+        const baseDescription = (firstTx.merchant || firstTx.description || doc.title).slice(0, 500);
+
+        // Check if user has an account matching the payment mode
+        let matchedAccountId: string | undefined = undefined;
+        if (firstTx.payment_mode) {
+          const pm = String(firstTx.payment_mode).toLowerCase();
+          const targetType = pm.includes("upi")
+            ? "upi"
+            : pm.includes("cash")
+            ? "cash"
+            : pm.includes("card")
+            ? "credit_card"
+            : undefined;
+          if (targetType) {
+            const acc = await prisma.account.findFirst({
+              where: { userId: doc.userId, accountType: targetType },
+            });
+            if (acc) matchedAccountId = acc.id;
+          }
+        }
+
+        // Annotate description with payment mode details
+        let finalDescription = baseDescription;
+        if (firstTx.payment_mode && !finalDescription.toLowerCase().includes(String(firstTx.payment_mode).toLowerCase())) {
+          const modeDetail = firstTx.payment_details
+            ? ` (${firstTx.payment_mode}: ${firstTx.payment_details})`
+            : ` (${firstTx.payment_mode})`;
+          finalDescription = `${finalDescription}${modeDetail}`.slice(0, 500);
+        }
 
         const newTx = await prisma.transaction.create({
           data: {
@@ -92,7 +121,8 @@ export async function processJob(job: DocumentJob): Promise<void> {
             amount: firstTx.amount,
             category: firstTx.category || "Other",
             transactionDate: isNaN(txDate.getTime()) ? new Date() : txDate,
-            description,
+            description: finalDescription,
+            accountId: matchedAccountId,
             source: "ocr",
           },
         });

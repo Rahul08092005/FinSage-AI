@@ -21,13 +21,17 @@ export async function exportReport(req: AuthedRequest, res: Response) {
   // --- 1. Gather last 3 months of data (same window as health-score) --------
   const threeMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 3, 1));
 
-  const [transactions, budgets, goals] = await Promise.all([
+  const [transactions, budgets, goals, user] = await Promise.all([
     prisma.transaction.findMany({
       where: { userId: req.userId, transactionDate: { gte: threeMonthsAgo } },
       orderBy: { transactionDate: "desc" },
     }),
     prisma.budget.findMany({ where: { userId: req.userId } }),
     prisma.goal.findMany({ where: { userId: req.userId } }),
+    prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { monthlySalary: true },
+    }),
   ]);
 
   // --- 2. Compute budget variance (same logic as budgets.controller.ts) ------
@@ -67,6 +71,7 @@ export async function exportReport(req: AuthedRequest, res: Response) {
     // Non-fatal — proceed with null score so the report still generates
   }
 
+<<<<<<< HEAD
   // --- 4. Phase 5: Build optional financial_plan payload --------------------
   // Only included when annualIncome is set; completely absent otherwise so the
   // AI engine template never sees a partial/broken object.
@@ -115,6 +120,13 @@ export async function exportReport(req: AuthedRequest, res: Response) {
   }
 
   // --- 5. Call Rahul's report-generate endpoint ------------------------------
+=======
+  // --- 4. Call Rahul's report-generate endpoint ------------------------------
+  const queryIncome = req.query.income ? Number(req.query.income) : undefined;
+  const query80c = req.query.current80c ? Number(req.query.current80c) : (req.query.current_investments ? Number(req.query.current_investments) : undefined);
+  const incomeVal = queryIncome ?? (user?.monthlySalary ? Number(user.monthlySalary) * 12 : undefined);
+
+>>>>>>> 51cd8e2f482d9209d7d062ff0dd8ec0f4589a414
   let markdown: string;
   try {
     const genRes = await fetch(`${AI_ENGINE_BASE}/internal/reports/generate`, {
@@ -125,9 +137,14 @@ export async function exportReport(req: AuthedRequest, res: Response) {
         budgets: budgetVariance,
         goals,
         health_score: healthScore,
+<<<<<<< HEAD
         // Phase 5: only included when annualIncome is set; undefined values are
         // omitted by JSON.stringify so the key is completely absent otherwise.
         ...(financialPlan !== undefined ? { financial_plan: financialPlan } : {}),
+=======
+        income: incomeVal,
+        current_investments: query80c ?? 0,
+>>>>>>> 51cd8e2f482d9209d7d062ff0dd8ec0f4589a414
       }),
     });
 

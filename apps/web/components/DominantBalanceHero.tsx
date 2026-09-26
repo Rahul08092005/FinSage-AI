@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { updateMonthlySalary } from "@/lib/api";
+import { formatINR } from "@/lib/formatCurrency";
 
 interface DominantBalanceHeroProps {
   token: string;
@@ -25,7 +26,7 @@ export function DominantBalanceHero({
   const [salaryError, setSalaryError] = useState<string | null>(null);
 
   const moneyIn = salary ?? 100000;
-  const moneyOut = spend ?? 71816;
+  const moneyOut = spend ?? 0;
   const available = Math.max(0, moneyIn - moneyOut);
   const savingsRate = moneyIn > 0 ? Math.round(((moneyIn - moneyOut) / moneyIn) * 100) : 0;
   const isPositive = moneyIn >= moneyOut;
@@ -74,7 +75,7 @@ export function DominantBalanceHero({
             <div className="h-9 w-44 animate-pulse rounded-lg bg-[#E5DAC4]/50" />
           ) : (
             <h2 className="font-serif text-3xl sm:text-4xl font-black tracking-tight text-[#18122B] tabular-nums">
-              ₹ {available.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+              {formatINR(available, { maximumFractionDigits: 2 })}
             </h2>
           )}
           <span className="text-[11px] font-bold uppercase tracking-wider text-[#18122B]/50">
@@ -140,7 +141,7 @@ export function DominantBalanceHero({
           </div>
         ) : (
           <p className="my-1.5 font-serif text-2xl font-black tracking-tight text-[#18122B] tabular-nums">
-            ₹ {moneyIn.toLocaleString("en-IN")}
+            {formatINR(moneyIn)}
           </p>
         )}
 
@@ -159,7 +160,7 @@ export function DominantBalanceHero({
         </div>
 
         <p className="my-1.5 font-serif text-2xl font-black tracking-tight text-[#18122B] tabular-nums">
-          ₹ {moneyOut.toLocaleString("en-IN")}
+          {formatINR(moneyOut)}
         </p>
 
         <span className="text-[11px] font-semibold text-[#C2410C]">

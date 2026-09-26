@@ -15,19 +15,31 @@ from app.analytics.spending import (
     calculate_budget_recommendation,
     detect_anomalies,
     calculate_health_score,
+    forecast_expenses,
 )
+try:
+    from app.analytics.spending import simulate_scenario
+except (ImportError, AttributeError):
+    try:
+        from app.analytics.simulation import simulate_scenario
+    except (ImportError, AttributeError):
+        simulate_scenario = None
+
 from app.analytics.csv_parser import parse_transactions_csv
 from app.analytics.normalization import normalize_batch
 from app.analytics.ml_categorizer import train_categorizer, retrain_from_corrections
 from app.documents.ocr_adapter import OCRAdapter
 from app.documents.pipeline import process_document
 from app.adapters.splitwise_adapter import SplitwiseAdapter, calculate_group_balances
+from app.agents.report_agent import assemble_financial_report
 from app.graph.supervisor import run_supervisor_graph
 from app.schemas.advisor import (
     OrchestrateRequest,
     OrchestrateResponse,
     RAGSearchRequest,
     RAGIngestRequest,
+    ForecastRequest,
+    WhatIfRequest,
 )
 from app.rag.domains import route_to_domain
 from app.rag.ingest import ingest_text, search_domain
@@ -61,6 +73,7 @@ def orchestrate(req: OrchestrateRequest):
     if isinstance(tx_json, (list, dict)):
         tx_json = json.dumps(tx_json, default=str)
 
+    current_80c = req.current_80c_investments if req.current_80c_investments is not None else req.current_investments
     result = run_supervisor_graph(
         user_id=req.user_id,
         session_id=req.session_id,
@@ -69,13 +82,47 @@ def orchestrate(req: OrchestrateRequest):
         transactions_json=tx_json,
         goals_json=req.goals_json,
         domain=req.domain,
+        income=req.income,
+        current_80c_investments=current_80c,
     )
     return OrchestrateResponse(
         answer=result.get("answer", ""),
         agent_path=result.get("agent_path", []),
         citations=result.get("citations", []),
         metrics=result.get("metrics", {}),
+        guru_perspectives=result.get("guru_perspectives"),
     )
+
+
+class ReportGenerateRequest(BaseModel):
+    transactions: Any = None
+    budgets: Any = None
+    goals: Any = None
+    health_score: Any = None
+    income: float | None = None
+    total_income: float | None = None
+    current_investments: float | None = None
+    current_80c_investments: float | None = None
+    investments: float | None = None
+
+
+@app.post("/internal/reports/generate")
+async def generate_report(req: ReportGenerateRequest):
+    """Generates an executive financial report including budget variance, goal progress,
+    and optional Unified Financial Plan (tax savings and SIP suggestions)."""
+    income = req.income if req.income is not None else req.total_income
+    current_inv = req.current_investments if req.current_investments is not None else (
+        req.current_80c_investments if req.current_80c_investments is not None else req.investments
+    )
+    markdown = assemble_financial_report(
+        transactions=req.transactions,
+        budgets=req.budgets,
+        goals=req.goals,
+        health_score=req.health_score,
+        income=income,
+        current_investments=current_inv,
+    )
+    return {"markdown": markdown}
 
 
 @app.post("/internal/rag/search")
@@ -218,6 +265,84 @@ async def health_score(req: HealthScoreRequest):
 
 
 # ---------------------------------------------------------------------------
+# Phase 6 — Predictive Financial Modeling & Simulation
+# ---------------------------------------------------------------------------
+
+
+@app.post("/internal/analytics/forecast")
+async def analytics_forecast(req: ForecastRequest | list[dict]):
+    """Forecast future monthly spending per category based on historical transactions.
+    Supports either { "transactions": [...], "months_ahead": int } or a raw transaction list.
+    """
+    if isinstance(req, list):
+        transactions = req
+        months_ahead = 1
+    else:
+        transactions = req.transactions
+        months_ahead = req.months_ahead
+
+    df = pd.DataFrame(transactions)
+    if not df.empty and "transactionDate" in df.columns and "date" not in df.columns:
+        df["date"] = df["transactionDate"]
+    if not df.empty and "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+
+    forecast = forecast_expenses(df, months_ahead=months_ahead)
+    return {
+        "forecast": forecast,
+        "months_ahead": months_ahead,
+        "total_projected": round(sum(forecast.values()), 2) if forecast else 0.0,
+    }
+
+
+@app.post("/internal/analytics/what-if")
+async def analytics_what_if(req: WhatIfRequest):
+    """What-if scenario modeling endpoint.
+    Wires Kavya's simulate_scenario() function once delivered or returns contract-ready modeling.
+    """
+    if simulate_scenario is not None and callable(simulate_scenario):
+        return simulate_scenario(
+            transactions=req.transactions,
+            category_adjustments=req.category_adjustments,
+            income_adjustment=req.income_adjustment,
+            monthly_salary=req.monthly_salary,
+            parameters=req.parameters,
+        )
+
+    # Contract-ready calculation if simulate_scenario is pending delivery
+    df = pd.DataFrame(req.transactions)
+    if not df.empty and "transactionDate" in df.columns and "date" not in df.columns:
+        df["date"] = df["transactionDate"]
+    baseline_spending = calculate_monthly_spending(df) if not df.empty else {"total": 0.0, "by_category": {}}
+    baseline_total = float(baseline_spending.get("total", 0.0))
+    by_cat = dict(baseline_spending.get("by_category", {}))
+
+    adjustments = req.category_adjustments or {}
+    projected_by_cat = {}
+    for cat, amt in by_cat.items():
+        adj = adjustments.get(cat, 0.0)
+        projected_by_cat[cat] = round(max(0.0, float(amt) * (1.0 + adj)), 2)
+
+    projected_total = round(sum(projected_by_cat.values()), 2) if projected_by_cat else baseline_total
+    monthly_savings_delta = round(baseline_total - projected_total, 2)
+    annual_savings_delta = round(monthly_savings_delta * 12.0, 2)
+
+    return {
+        "status": "success",
+        "scenario": req.scenario_type or "what_if_simulation",
+        "baseline_monthly_spend": baseline_total,
+        "projected_monthly_spend": projected_total,
+        "monthly_savings_delta": monthly_savings_delta,
+        "annual_savings_delta": annual_savings_delta,
+        "category_projections": projected_by_cat,
+        "summary": (
+            f"Adjustments project a monthly spend change from ₹{baseline_total:,.2f} to ₹{projected_total:,.2f}, "
+            f"yielding potential net annual savings of ₹{annual_savings_delta:,.2f}."
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Phase 3 — ML categorizer retraining (Step 10)
 # ---------------------------------------------------------------------------
 
@@ -229,3 +354,42 @@ async def retrain_categorizer(corrected_transactions: list[dict]):
     subsequent calls to categorize_transaction() reflect the corrections."""
     retrain_from_corrections(corrected_transactions)
     return {"status": "ok", "retrained_on": len(corrected_transactions)}
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — Bank/UPI SMS-parsing adapter (Kavya, Step 4)
+# ---------------------------------------------------------------------------
+
+
+class SMSParseRequest(BaseModel):
+    sms_text: str
+
+
+@app.post("/internal/adapters/bank-upi/parse")
+async def bank_upi_parse(req: SMSParseRequest):
+    """Parse an Indian bank/UPI SMS into a normalised transaction dict.
+
+    Response shape (contractual):
+        { "transaction": {...normalized} | null, "confidence": float }
+
+    Uses the same confidence-scoring approach as document processing
+    (score_extraction from confidence.py).
+    """
+    from app.adapters.bank_upi_adapter import BankUPIAdapter, parse_sms
+    from app.documents.confidence import score_extraction
+
+    parsed = parse_sms(req.sms_text)
+
+    if parsed is None:
+        return {"transaction": None, "confidence": 0.0}
+
+    # Normalise through the adapter interface
+    adapter = BankUPIAdapter()
+    normalised_list = adapter.normalize_data(parsed)
+    normalised = normalised_list[0] if normalised_list else None
+
+    # Compute confidence using the same scoring as document extraction
+    confidence = score_extraction(parsed) if parsed else 0.0
+
+    return {"transaction": normalised, "confidence": confidence}
+

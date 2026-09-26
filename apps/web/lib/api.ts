@@ -55,7 +55,14 @@ export async function getTransactions(token: string, limit = 100) {
 
 export async function createTransaction(
   token: string,
-  data: { amount: number; category: string; transactionDate: string; description: string }
+  data: {
+    amount: number;
+    category: string;
+    transactionDate: string;
+    description: string;
+    accountId?: string;
+    source?: string;
+  }
 ) {
   const res = await fetch(`${BFF_URL}/api/v1/transactions`, {
     method: "POST",
@@ -237,6 +244,18 @@ export async function confirmDocument(
   return res.json();
 }
 
+export async function deleteDocument(token: string, id: string) {
+  const res = await fetch(`${BFF_URL}/api/v1/documents/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to delete document");
+  }
+  return res.json().catch(() => ({ success: true }));
+}
+
 export async function streamAdvisorChat(
   token: string,
   message: string,
@@ -318,8 +337,8 @@ export async function streamAdvisorChat(
             if (Array.isArray(parsed.citations) && parsed.citations.length > 0) {
               onCitations?.(parsed.citations);
             }
-            if (parsed.token) {
-              onChunk(parsed.token);
+            if (parsed.token !== undefined && parsed.token !== null) {
+              onChunk(String(parsed.token));
               continue;
             }
             if (parsed.answer) {
@@ -396,7 +415,13 @@ export async function getExpenseSummary(token: string, monthStr?: string) {
   return res.json();
 }
 
-export async function getSpendingTrend(token: string): Promise<Array<{ month: string; total: number }>> {
+export interface TrendItem {
+  month: string;
+  total: number;
+  byCategory?: Array<{ category: string; total: number; count: number }>;
+}
+
+export async function getSpendingTrend(token: string): Promise<TrendItem[]> {
   const months: string[] = [];
   const monthLabels: string[] = [];
   const now = new Date();
@@ -416,11 +441,15 @@ export async function getSpendingTrend(token: string): Promise<Array<{ month: st
           headers: authHeaders(token),
           cache: "no-store",
         });
-        if (!res.ok) return { month: monthLabels[idx], total: 0 };
+        if (!res.ok) return { month: monthLabels[idx], total: 0, byCategory: [] };
         const data = await res.json();
-        return { month: monthLabels[idx], total: Number(data.total) || 0 };
+        return {
+          month: monthLabels[idx],
+          total: Number(data.total) || 0,
+          byCategory: data.byCategory || [],
+        };
       } catch {
-        return { month: monthLabels[idx], total: 0 };
+        return { month: monthLabels[idx], total: 0, byCategory: [] };
       }
     })
   );
@@ -457,4 +486,151 @@ export async function importTransactionsCsv(token: string, file: File): Promise<
   return res.json();
 }
 
+export interface ParsedSmsDraft {
+  amount?: number | string;
+  type?: "debit" | "credit" | string;
+  description?: string;
+  merchant?: string;
+  date?: string;
+  transactionDate?: string;
+  category?: string;
+  account?: string;
+  accountId?: string;
+  source?: string;
+  confidence?: number;
+  [key: string]: any;
+}
 
+export interface ParseSmsResponse {
+  draft?: ParsedSmsDraft | null;
+  transaction?: ParsedSmsDraft | null;
+  confidence?: number;
+  [key: string]: any;
+}
+
+export async function parseSms(token: string, smsText: string): Promise<ParseSmsResponse | any> {
+  const res = await fetch(`${BFF_URL}/api/v1/transactions/parse-sms`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify({ smsText, sms_text: smsText }),
+  });
+  if (!res.ok) {
+    let errMsg = "Failed to parse SMS";
+    try {
+      const json = await res.json();
+      errMsg = json.error || json.message || errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+  return res.json();
+}
+
+export async function confirmSmsTransaction(
+  token: string,
+  draft: Record<string, any>
+): Promise<any> {
+  try {
+    const res = await fetch(`${BFF_URL}/api/v1/transactions/confirm-sms`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify(draft),
+    });
+    if (res.ok) {
+      return res.json();
+    }
+  } catch (err) {
+    console.error("[confirmSmsTransaction] primary endpoint error, falling back to createTransaction:", err);
+  }
+
+  // Resilient fallback to createTransaction
+  return createTransaction(token, {
+    amount: Number(draft.amount),
+    category: draft.category || "General",
+    description: draft.description || "Bank SMS transaction",
+    transactionDate: draft.transactionDate || draft.date || new Date().toISOString(),
+    accountId: draft.accountId,
+    source: "bank_sms",
+  });
+}
+
+export interface TaxProfileData {
+  annualIncome: number;
+  current80cInvestments: number;
+  [key: string]: any;
+}
+
+export async function updateTaxProfile(
+  token: string,
+  data: { annualIncome: number; current80cInvestments: number; [key: string]: any }
+): Promise<any> {
+  const payload = {
+    annualIncome: Number(data.annualIncome),
+    annual_income: Number(data.annualIncome),
+    income: Number(data.annualIncome),
+    current80cInvestments: Number(data.current80cInvestments),
+    current_80c_investments: Number(data.current80cInvestments),
+    currentInvestments: Number(data.current80cInvestments),
+  };
+
+  // Primary endpoint: /api/v1/users/tax-profile
+  // Also defensive against /api/v1/users/me/tax-profile or /api/v1/tax-profile
+  let res: Response;
+  try {
+    res = await fetch(`${BFF_URL}/api/v1/users/tax-profile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.status === 404) {
+      res = await fetch(`${BFF_URL}/api/v1/users/me/tax-profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders(token) },
+        body: JSON.stringify(payload),
+      });
+    }
+
+    if (res.status === 404) {
+      res = await fetch(`${BFF_URL}/api/v1/tax-profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders(token) },
+        body: JSON.stringify(payload),
+      });
+    }
+  } catch (err: any) {
+    throw new Error(err.message || "Failed to reach tax profile service");
+  }
+
+  if (!res.ok) {
+    let errMsg = "Failed to update tax profile";
+    try {
+      const json = await res.json();
+      errMsg =
+        json.error?.formErrors?.join(", ") ||
+        (typeof json.error === "string" ? json.error : json.message) ||
+        errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  return res.json().catch(() => ({ success: true }));
+}
+
+export async function getTaxProfile(token: string): Promise<any> {
+  try {
+    let res = await fetch(`${BFF_URL}/api/v1/users/tax-profile`, {
+      headers: authHeaders(token),
+      cache: "no-store",
+    });
+    if (res.status === 404) {
+      res = await fetch(`${BFF_URL}/api/v1/users/me/tax-profile`, {
+        headers: authHeaders(token),
+        cache: "no-store",
+      });
+    }
+    if (!res.ok) return null;
+    return res.json().catch(() => null);
+  } catch {
+    return null;
+  }
+}

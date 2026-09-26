@@ -26,7 +26,8 @@ export function Navbar() {
     pathname?.startsWith("/budgets") ||
     pathname?.startsWith("/goals") ||
     pathname?.startsWith("/documents") ||
-    pathname?.startsWith("/advisor");
+    pathname?.startsWith("/advisor") ||
+    pathname?.startsWith("/financial-plan");
 
   const navLinks = [
     { href: "/dashboard", label: "Dashboard" },
@@ -35,6 +36,7 @@ export function Navbar() {
     { href: "/goals", label: "Goals" },
     { href: "/documents", label: "Documents" },
     { href: "/advisor", label: "AI Advisor", isAi: true },
+    { href: "/financial-plan", label: "Financial Plan" },
   ];
 
   return (

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { formatINR } from "@/lib/formatCurrency";
 
 interface MoneyMoveCardProps {
   salary: number | null;
@@ -10,7 +11,7 @@ interface MoneyMoveCardProps {
 
 export function MoneyMoveCard({ salary, spend }: MoneyMoveCardProps) {
   const moneyIn = salary ?? 100000;
-  const moneyOut = spend ?? 71816;
+  const moneyOut = spend ?? 0;
   const retained = Math.max(0, moneyIn - moneyOut);
   const savingsRate = moneyIn > 0 ? ((retained / moneyIn) * 100).toFixed(1) : "28.2";
   const recommendedBuffer = Math.round(retained * 0.55);
@@ -48,9 +49,9 @@ export function MoneyMoveCard({ salary, spend }: MoneyMoveCardProps) {
 
         {/* Editorial Body */}
         <p className="mt-3 text-sm sm:text-base font-semibold leading-relaxed text-[#18122B]/85">
-          You generated <strong className="text-[#18122B] font-black">₹{retained.toLocaleString("en-IN")}</strong> in free
+          You generated <strong className="text-[#18122B] font-black">{formatINR(retained)}</strong> in free
           cash flow this September. Deploying{" "}
-          <strong className="text-[#18122B] font-black">₹{recommendedBuffer.toLocaleString("en-IN")}</strong> into your
+          <strong className="text-[#18122B] font-black">{formatINR(recommendedBuffer)}</strong> into your
           emergency reserve protects your streak against seasonal volatility.
         </p>
 
