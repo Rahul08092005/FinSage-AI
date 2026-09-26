@@ -16,6 +16,8 @@ import knowledgeRoutes from "./routes/knowledge.routes";
 import analyticsRoutes from "./routes/analytics.routes";
 // Phase 4 routes
 import reportsRoutes from "./routes/reports.routes";
+// Phase 6 routes
+import marketRoutes from "./routes/market.routes";
 import { workerLoop } from "./workers/document.worker";
 
 dotenv.config();
@@ -44,6 +46,8 @@ app.use("/api/v1/knowledge", knowledgeRoutes);
 app.use("/api/v1/analytics", analyticsRoutes);
 // Phase 4
 app.use("/api/v1/reports", reportsRoutes);
+// Phase 6
+app.use("/api/v1/market", marketRoutes);
 
 app.listen(PORT, () => {
   console.log(`[bff-server] listening on http://localhost:${PORT}`);
