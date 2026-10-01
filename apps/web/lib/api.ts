@@ -634,3 +634,64 @@ export async function getTaxProfile(token: string): Promise<any> {
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Phase 6: What-If Simulator API Contract
+// ---------------------------------------------------------------------------
+
+export interface WhatIfScenarioRequest {
+  incomeDelta: number;      // Monthly income change in INR (e.g. +10000, -5000)
+  expenseDelta: number;     // Monthly expense change in INR (e.g. -5000, +2000)
+  savingsRateDelta: number; // Savings-rate change in percentage points (e.g. 5 = +5%)
+}
+
+export interface WhatIfGoalProjection {
+  id: string;
+  title: string;
+  originalEta?: string;     // e.g. "2027-01-01" or date string
+  revisedEta?: string;      // e.g. "2026-09-15" or date string
+  onTrack?: boolean;
+  projectedSavings?: number;
+  monthsDelta?: number;
+  targetAmount?: number;
+  currentSaved?: number;
+  [key: string]: any;
+}
+
+export interface WhatIfScenarioResponse {
+  goals: WhatIfGoalProjection[];
+  summary?: string;
+  monthlySavingsDelta?: number;
+  annualSavingsDelta?: number;
+  status?: string;
+  [key: string]: any;
+}
+
+export async function whatIfScenario(
+  token: string,
+  data: WhatIfScenarioRequest
+): Promise<WhatIfScenarioResponse> {
+  const res = await fetch(`${BFF_URL}/api/v1/goals/what-if`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify({
+      incomeDelta: Number(data.incomeDelta || 0),
+      expenseDelta: Number(data.expenseDelta || 0),
+      savingsRateDelta: Number(data.savingsRateDelta || 0),
+    }),
+  });
+
+  if (!res.ok) {
+    let errMsg = "Couldn't run that scenario right now.";
+    try {
+      const json = await res.json();
+      errMsg =
+        json.error?.formErrors?.join(", ") ||
+        (typeof json.error === "string" ? json.error : json.detail || json.message) ||
+        errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  return res.json();
+}
