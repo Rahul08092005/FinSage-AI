@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { streamAdvisorChat, exportFinancialReport } from "@/lib/api";
-import { AdvisorResponseView } from "./AdvisorResponseView";
+import { AdvisorResponseView, StructuredGuruPerspective } from "./AdvisorResponseView";
 import { CitationSourceControl } from "./CitationSourceControl";
 
 interface Message {
@@ -12,7 +12,9 @@ interface Message {
   timestamp: string;
   mode?: "advisor" | "compare";
   citations?: any[];
+  guru_perspectives?: StructuredGuruPerspective[];
 }
+
 
 const ADVISOR_PROMPTS = [
   "How much did I spend on Food this month?",
@@ -110,9 +112,19 @@ export function AdvisorChat({ token }: { token: string }) {
             )
           );
         }
+      },
+      (guru_perspectives) => {
+        if (Array.isArray(guru_perspectives) && guru_perspectives.length > 0) {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === advisorMsgId ? { ...msg, guru_perspectives } : msg
+            )
+          );
+        }
       }
     );
   }
+
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -373,7 +385,9 @@ export function AdvisorChat({ token }: { token: string }) {
                       content={msg.content}
                       isStreaming={isStreaming && msg.id === messages[messages.length - 1]?.id}
                       mode={msg.mode || mode}
+                      guru_perspectives={msg.guru_perspectives}
                     />
+
 
                     {/* Grounded Evidence / Citation Source Control */}
                     <CitationSourceControl citations={msg.citations} />

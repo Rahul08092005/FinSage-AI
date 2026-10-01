@@ -262,7 +262,8 @@ export async function streamAdvisorChat(
   onChunk: (chunk: string) => void,
   onDone: () => void,
   onError: (err: any) => void,
-  onCitations?: (citations: any[]) => void
+  onCitations?: (citations: any[]) => void,
+  onGuruPerspectives?: (perspectives: any[]) => void
 ) {
   try {
     const res = await fetch(`${BFF_URL}/api/v1/advisor/chat`, {
@@ -285,6 +286,9 @@ export async function streamAdvisorChat(
       }
       if (Array.isArray(data.citations) && data.citations.length > 0) {
         onCitations?.(data.citations);
+      }
+      if (Array.isArray(data.guru_perspectives) && data.guru_perspectives.length > 0) {
+        onGuruPerspectives?.(data.guru_perspectives);
       }
       onDone();
       return;
@@ -330,12 +334,29 @@ export async function streamAdvisorChat(
           continue;
         }
 
-        // Check for JSON object chunk with citations
+        // Check for guru_perspectives payload
+        if (payload.startsWith("[GURU_PERSPECTIVES]")) {
+          try {
+            const raw = payload.slice(19).trim();
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              onGuruPerspectives?.(parsed);
+            }
+          } catch (e) {
+            console.warn("[streamAdvisorChat] Failed to parse guru_perspectives:", e);
+          }
+          continue;
+        }
+
+        // Check for JSON object chunk with citations or guru_perspectives
         if (payload.trim().startsWith("{") && payload.trim().endsWith("}")) {
           try {
             const parsed = JSON.parse(payload.trim());
             if (Array.isArray(parsed.citations) && parsed.citations.length > 0) {
               onCitations?.(parsed.citations);
+            }
+            if (Array.isArray(parsed.guru_perspectives) && parsed.guru_perspectives.length > 0) {
+              onGuruPerspectives?.(parsed.guru_perspectives);
             }
             if (parsed.token !== undefined && parsed.token !== null) {
               onChunk(String(parsed.token));
@@ -353,6 +374,7 @@ export async function streamAdvisorChat(
     }
     onDone();
   } catch (err: any) {
+
     const message =
       err?.name === "AbortError"
         ? "Advisor stream was cancelled."
