@@ -9,7 +9,7 @@ import re
 import numpy as np
 import pandas as pd
 
-from app.analytics.spending import fit_linear_trend
+from app.analytics.spending import fit_linear_trend, calculate_goal_projection
 
 # ---------------------------------------------------------------------------
 # Constants and Classification Sets
@@ -788,6 +788,253 @@ def detect_money_leaks(
 
 
 # ---------------------------------------------------------------------------
+# Step 4.3 — Forward-Looking Risk Warnings
+# ---------------------------------------------------------------------------
+
+
+def detect_savings_decline(
+    transactions: pd.DataFrame | list[dict] | None,
+    monthly_salary: float | None = None,
+) -> dict | None:
+    """Detect sustained decline in net monthly savings over 3+ months.
+
+    If monthly_salary is available, computes net savings (salary minus total spend)
+    per month for the last 3+ months and flags a sustained decline.
+
+    Args:
+        transactions:   DataFrame or list of transactions.
+        monthly_salary: Monthly salary/income. Required to compute net savings.
+
+    Returns:
+        Warning dict if a sustained decline is detected, else None:
+        {
+            "type": "warning",
+            "subtype": "savings_decline",
+            "message": str,
+            "months_of_data": int,
+            "evidence": dict,
+        }
+    """
+    if monthly_salary is None:
+        return None
+
+    try:
+        salary_val = float(monthly_salary)
+    except (ValueError, TypeError):
+        return None
+
+    if salary_val <= 0:
+        return None
+
+    df = _normalize_transactions_df(transactions)
+    if df.empty:
+        return None
+
+    expenses = df[df["amount"] > 0].copy()
+    if expenses.empty:
+        return None
+
+    expenses["month"] = expenses["date"].dt.to_period("M")
+    monthly_spend = expenses.groupby("month")["amount"].sum().sort_index()
+
+    n_months = len(monthly_spend)
+    if n_months < DEFAULT_TREND_MIN_MONTHS:
+        return None
+
+    # Calculate net savings per month: salary - spend
+    net_savings = monthly_spend.apply(lambda s: salary_val - float(s))
+    net_vals = net_savings.values.astype(float)
+
+    slope, intercept = fit_linear_trend(net_vals)
+
+    # Sustained decline criteria:
+    # 1. Slope < 0 (savings decreasing over time)
+    # 2. Latest net savings is strictly lower than starting net savings
+    # 3. Strictly decreasing step-by-step OR clear negative slope with latest < previous
+    is_strictly_decreasing = all(net_vals[i] < net_vals[i - 1] for i in range(1, n_months))
+    is_trend_declining = (slope < 0) and (net_vals[-1] < net_vals[0]) and (net_vals[-1] < net_vals[-2])
+
+    if not (is_strictly_decreasing or is_trend_declining):
+        return None
+
+    start_sav = net_vals[0]
+    latest_sav = net_vals[-1]
+    decline_amount = start_sav - latest_sav
+
+    message = (
+        f"Net monthly savings have consistently declined over the last {n_months} months "
+        f"(from ₹{start_sav:,.2f} to ₹{latest_sav:,.2f}, down ₹{decline_amount:,.2f}/month)."
+    )
+
+    return {
+        "type": "warning",
+        "subtype": "savings_decline",
+        "message": message,
+        "months_of_data": n_months,
+        "evidence": {
+            "monthly_salary": salary_val,
+            "monthly_net_savings": {str(m): round(float(v), 2) for m, v in net_savings.items()},
+            "slope": round(float(slope), 2),
+            "initial_savings": round(float(start_sav), 2),
+            "latest_savings": round(float(latest_sav), 2),
+            "months_analyzed": n_months,
+        },
+    }
+
+
+def detect_discretionary_outpacing_income(
+    transactions: pd.DataFrame | list[dict] | None,
+    monthly_salary: float | None = None,
+) -> dict | None:
+    """Compare discretionary category growth against salary growth over 3+ months.
+
+    Evaluates discretionary categories (Food, Shopping, Entertainment, etc.) over
+    the last 3+ months and flags if their growth rate outpaces income growth
+    (or flat salary rate of 0% if unchanged).
+
+    Args:
+        transactions:   DataFrame or list of transactions.
+        monthly_salary: Optional user salary amount.
+
+    Returns:
+        Warning dict if discretionary spending outpaces income, else None:
+        {
+            "type": "warning",
+            "subtype": "discretionary_outpacing_income",
+            "message": str,
+            "months_of_data": int,
+            "evidence": dict,
+        }
+    """
+    df = _normalize_transactions_df(transactions)
+    if df.empty:
+        return None
+
+    expenses = df[df["amount"] > 0].copy()
+    if expenses.empty:
+        return None
+
+    # Filter discretionary category expenses
+    disc_df = expenses[expenses["category"].apply(_is_discretionary)].copy()
+    if disc_df.empty:
+        return None
+
+    disc_df["month"] = disc_df["date"].dt.to_period("M")
+    disc_monthly = disc_df.groupby("month")["amount"].sum().sort_index()
+
+    n_months = len(disc_monthly)
+    if n_months < DEFAULT_TREND_MIN_MONTHS:
+        return None
+
+    disc_vals = disc_monthly.values.astype(float)
+    disc_slope, _ = fit_linear_trend(disc_vals)
+    disc_mean = float(np.mean(disc_vals))
+
+    if disc_mean <= 0 or disc_slope <= 0 or disc_vals[-1] <= disc_vals[0]:
+        return None
+
+    disc_growth_rate = disc_slope / disc_mean
+
+    # Check for income / salary growth rate in transaction data if present
+    income_growth_rate = 0.0
+    salary_keywords = {"salary", "payroll", "stipend", "direct dep", "neft credit"}
+    cat_mask = df["category"].str.lower().isin(["salary", "income"])
+    desc_mask = pd.Series(False, index=df.index)
+    if "description" in df.columns:
+        desc_mask = df["description"].astype(str).str.lower().apply(
+            lambda d: any(kw in d for kw in salary_keywords)
+        )
+    credit_mask = df["amount"] < 0
+
+    inc_rows = df[cat_mask | desc_mask | credit_mask].copy()
+    if not inc_rows.empty:
+        inc_rows["abs_amount"] = inc_rows["amount"].abs()
+        inc_rows["month"] = inc_rows["date"].dt.to_period("M")
+        inc_monthly = inc_rows.groupby("month")["abs_amount"].sum().sort_index()
+        if len(inc_monthly) >= DEFAULT_TREND_MIN_MONTHS:
+            inc_vals = inc_monthly.values.astype(float)
+            inc_slope, _ = fit_linear_trend(inc_vals)
+            inc_mean = float(np.mean(inc_vals))
+            if inc_mean > 0:
+                income_growth_rate = max(0.0, inc_slope / inc_mean)
+
+    # Discretionary growth rate must exceed income growth rate
+    if disc_growth_rate <= income_growth_rate + 0.02:
+        return None
+
+    disc_pct = disc_growth_rate * 100.0
+    inc_pct = income_growth_rate * 100.0
+
+    message = (
+        f"Discretionary spending growth (+{disc_pct:.1f}%/month) is outpacing income growth "
+        f"({'+' if inc_pct > 0 else ''}{inc_pct:.1f}%/month) over the last {n_months} months."
+    )
+
+    return {
+        "type": "warning",
+        "subtype": "discretionary_outpacing_income",
+        "message": message,
+        "months_of_data": n_months,
+        "evidence": {
+            "discretionary_monthly_totals": {str(m): round(float(v), 2) for m, v in disc_monthly.items()},
+            "discretionary_slope": round(float(disc_slope), 2),
+            "discretionary_growth_rate_pct": round(float(disc_pct), 1),
+            "income_growth_rate_pct": round(float(inc_pct), 1),
+            "months_analyzed": n_months,
+            "monthly_salary": monthly_salary,
+        },
+    }
+
+
+def detect_goal_delay_risk(
+    goal: dict,
+    projection: dict,
+) -> dict | None:
+    """Wrap calculate_goal_projection() result into a warning if off-track.
+
+    Args:
+        goal:       Goal dict containing title, target_amount, deadline/target_date.
+        projection: Output dict from calculate_goal_projection().
+
+    Returns:
+        Warning dict if on_track is False, else None:
+        {
+            "type": "warning",
+            "subtype": "goal_delay_risk",
+            "message": str,
+            "goal_title": str,
+            "evidence": dict,
+        }
+    """
+    if not isinstance(projection, dict) or projection.get("on_track", True):
+        return None
+
+    goal_title = str(goal.get("title") or goal.get("name") or goal.get("goal_name") or "Savings Goal").strip()
+    projected_date = str(projection.get("projected_date", "unknown date"))
+    months_remaining = projection.get("months_remaining", 0)
+    target_date = str(goal.get("target_date") or goal.get("deadline") or goal.get("targetDate") or "target date")
+
+    message = (
+        f"Goal '{goal_title}' is at risk of delay. Current savings velocity projects completion by "
+        f"{projected_date} ({months_remaining} months away), missing the target date of {target_date}."
+    )
+
+    return {
+        "type": "warning",
+        "subtype": "goal_delay_risk",
+        "message": message,
+        "goal_title": goal_title,
+        "evidence": {
+            "goal": goal,
+            "projection": projection,
+            "target_date": target_date,
+            "projected_date": projected_date,
+            "months_remaining": months_remaining,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Top-Level Orchestration
 # ---------------------------------------------------------------------------
 
@@ -795,12 +1042,16 @@ def detect_money_leaks(
 def run_pattern_detection(
     transactions: pd.DataFrame | list[dict] | None,
     salary_day: int | None = None,
+    monthly_salary: float | None = None,
+    goals: list[dict] | dict | None = None,
 ) -> list[dict]:
     """Execute all pattern detection heuristics and return a unified list of findings.
 
     Args:
-        transactions: DataFrame or list of transactions with date, amount, category.
-        salary_day:   Optional day-of-month when salary arrives (e.g. from user profile).
+        transactions:   DataFrame or list of transactions with date, amount, category.
+        salary_day:     Optional day-of-month when salary arrives (e.g. from user profile).
+        monthly_salary: Optional user monthly salary/income.
+        goals:          Optional list of goal dicts (or single goal dict).
 
     Returns:
         List of pattern and insight dicts covering:
@@ -809,6 +1060,9 @@ def run_pattern_detection(
         3. Upward category trends (type: "pattern")
         4. Recurring subscriptions (type: "subscription")
         5. Money leaks (type: "leak")
+        6. Net savings decline risk (type: "warning", subtype: "savings_decline")
+        7. Discretionary outpacing income risk (type: "warning", subtype: "discretionary_outpacing_income")
+        8. Goal delay risk (type: "warning", subtype: "goal_delay_risk")
     """
     df = _normalize_transactions_df(transactions)
     if df.empty:
@@ -844,6 +1098,27 @@ def run_pattern_detection(
     leaks = detect_money_leaks(df)
     patterns.extend(leaks)
 
+    # 6. Risk Warnings — Savings Decline
+    savings_warn = detect_savings_decline(df, monthly_salary=monthly_salary)
+    if savings_warn is not None:
+        patterns.append(savings_warn)
+
+    # 7. Risk Warnings — Discretionary Outpacing Income
+    disc_warn = detect_discretionary_outpacing_income(df, monthly_salary=monthly_salary)
+    if disc_warn is not None:
+        patterns.append(disc_warn)
+
+    # 8. Risk Warnings — Goal Delay Risk
+    if goals:
+        goals_list = [goals] if isinstance(goals, dict) else goals
+        if isinstance(goals_list, list):
+            for g in goals_list:
+                if isinstance(g, dict) and g:
+                    proj = calculate_goal_projection(g, df, monthly_salary=monthly_salary)
+                    g_warn = detect_goal_delay_risk(g, proj)
+                    if g_warn is not None:
+                        patterns.append(g_warn)
+
     return patterns
 
 
@@ -864,5 +1139,8 @@ __all__ = [
     "detect_category_trend",
     "detect_recurring_subscriptions",
     "detect_money_leaks",
+    "detect_savings_decline",
+    "detect_discretionary_outpacing_income",
+    "detect_goal_delay_risk",
     "run_pattern_detection",
 ]

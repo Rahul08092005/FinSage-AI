@@ -610,6 +610,9 @@ from app.analytics.pattern_engine import (
     detect_category_trend,
     detect_recurring_subscriptions,
     detect_money_leaks,
+    detect_savings_decline,
+    detect_discretionary_outpacing_income,
+    detect_goal_delay_risk,
     run_pattern_detection,
 )
 
@@ -943,5 +946,163 @@ class TestRunPatternDetection:
         assert run_pattern_detection(pd.DataFrame()) == []
         assert run_pattern_detection(None) == []
         assert run_pattern_detection([]) == []
+
+
+# ===========================================================================
+# Step 4.3 Unit Tests: Risk Warnings
+# ===========================================================================
+
+
+class TestDetectSavingsDecline:
+    """Verification for detect_savings_decline()."""
+
+    def test_declining_net_savings_3_months_fires_warning(self):
+        """3 months of declining net savings (spend 30k -> 40k -> 50k, salary 80k)."""
+        rows = [
+            {"date": "2026-01-15", "amount": 30000.0, "category": "General"},
+            {"date": "2026-02-15", "amount": 40000.0, "category": "General"},
+            {"date": "2026-03-15", "amount": 50000.0, "category": "General"},
+        ]
+        df = pd.DataFrame(rows)
+        warn = detect_savings_decline(df, monthly_salary=80000.0)
+
+        assert warn is not None
+        assert warn["type"] == "warning"
+        assert warn["subtype"] == "savings_decline"
+        assert warn["months_of_data"] == 3
+        assert "consistently declined" in warn["message"]
+        assert warn["evidence"]["initial_savings"] == 50000.0
+        assert warn["evidence"]["latest_savings"] == 30000.0
+
+    def test_healthy_flat_spending_no_warning(self):
+        """Flat spend month-over-month produces constant savings -> no false positive warning."""
+        rows = [
+            {"date": "2026-01-15", "amount": 30000.0, "category": "General"},
+            {"date": "2026-02-15", "amount": 30000.0, "category": "General"},
+            {"date": "2026-03-15", "amount": 30000.0, "category": "General"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_savings_decline(df, monthly_salary=80000.0) is None
+
+    def test_healthy_increasing_savings_no_warning(self):
+        """Increasing net savings -> no warning."""
+        rows = [
+            {"date": "2026-01-15", "amount": 40000.0, "category": "General"},
+            {"date": "2026-02-15", "amount": 35000.0, "category": "General"},
+            {"date": "2026-03-15", "amount": 30000.0, "category": "General"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_savings_decline(df, monthly_salary=80000.0) is None
+
+    def test_no_salary_or_under_3_months_returns_none(self):
+        """No salary or <3 months returns None."""
+        rows = [
+            {"date": "2026-01-15", "amount": 30000.0, "category": "General"},
+            {"date": "2026-02-15", "amount": 40000.0, "category": "General"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_savings_decline(df, monthly_salary=None) is None
+        assert detect_savings_decline(df, monthly_salary=80000.0) is None
+
+
+class TestDetectDiscretionaryOutpacingIncome:
+    """Verification for detect_discretionary_outpacing_income()."""
+
+    def test_discretionary_outpacing_flat_income_fires_warning(self):
+        """Discretionary categories growing while salary is flat."""
+        rows = [
+            {"date": "2026-01-15", "amount": 10000.0, "category": "Food"},
+            {"date": "2026-02-15", "amount": 15000.0, "category": "Shopping"},
+            {"date": "2026-03-15", "amount": 20000.0, "category": "Entertainment"},
+        ]
+        df = pd.DataFrame(rows)
+        warn = detect_discretionary_outpacing_income(df, monthly_salary=80000.0)
+
+        assert warn is not None
+        assert warn["type"] == "warning"
+        assert warn["subtype"] == "discretionary_outpacing_income"
+        assert warn["months_of_data"] == 3
+        assert "outpacing income" in warn["message"]
+
+    def test_healthy_discretionary_spend_no_warning(self):
+        """Flat discretionary spending produces no warning."""
+        rows = [
+            {"date": "2026-01-15", "amount": 10000.0, "category": "Food"},
+            {"date": "2026-02-15", "amount": 10000.0, "category": "Shopping"},
+            {"date": "2026-03-15", "amount": 10000.0, "category": "Entertainment"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_discretionary_outpacing_income(df, monthly_salary=80000.0) is None
+
+    def test_income_growing_faster_than_discretionary_no_warning(self):
+        """Income growing faster than discretionary spend -> no warning."""
+        rows = [
+            # Discretionary spend: 10k -> 11k -> 12k (+10% slope)
+            {"date": "2026-01-15", "amount": 10000.0, "category": "Food"},
+            {"date": "2026-02-15", "amount": 11000.0, "category": "Food"},
+            {"date": "2026-03-15", "amount": 12000.0, "category": "Food"},
+            # Salary credit: 50k -> 75k -> 100k (+45% slope)
+            {"date": "2026-01-01", "amount": 50000.0, "category": "Salary"},
+            {"date": "2026-02-01", "amount": 75000.0, "category": "Salary"},
+            {"date": "2026-03-01", "amount": 100000.0, "category": "Salary"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_discretionary_outpacing_income(df, monthly_salary=None) is None
+
+
+class TestDetectGoalDelayRisk:
+    """Verification for detect_goal_delay_risk()."""
+
+    def test_off_track_goal_fires_warning(self):
+        """Projection with on_track=False produces a warning dict."""
+        goal = {"title": "Buy Laptop", "target_amount": 100000, "target_date": "2026-05-01"}
+        proj = {"on_track": False, "projected_date": "2027-01-15", "months_remaining": 9}
+        warn = detect_goal_delay_risk(goal, proj)
+
+        assert warn is not None
+        assert warn["type"] == "warning"
+        assert warn["subtype"] == "goal_delay_risk"
+        assert warn["goal_title"] == "Buy Laptop"
+        assert "risk of delay" in warn["message"]
+
+    def test_on_track_goal_returns_none(self):
+        """Projection with on_track=True returns None."""
+        goal = {"title": "Emergency Fund", "target_amount": 50000, "target_date": "2028-01-01"}
+        proj = {"on_track": True, "projected_date": "2026-12-01", "months_remaining": 2}
+        assert detect_goal_delay_risk(goal, proj) is None
+
+
+class TestRunPatternDetectionStep43:
+    """Verification for run_pattern_detection() optional parameters and risk warnings."""
+
+    def test_unaffected_callers_without_salary_or_goals(self):
+        """Callers from 4.1-4.2 passing only transactions work without error."""
+        rows = [
+            {"date": "2026-01-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            {"date": "2026-02-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            {"date": "2026-03-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+        ]
+        df = pd.DataFrame(rows)
+        results = run_pattern_detection(df)
+        assert isinstance(results, list)
+        assert any(r["type"] == "subscription" for r in results)
+
+    def test_includes_risk_warnings_when_salary_and_goals_provided(self):
+        """Passing salary and off-track goals appends warning-type insights."""
+        rows = [
+            # 3 months of rising spending -> declining net savings
+            {"date": "2026-01-15", "amount": 30000.0, "category": "Shopping"},
+            {"date": "2026-02-15", "amount": 40000.0, "category": "Shopping"},
+            {"date": "2026-03-15", "amount": 50000.0, "category": "Shopping"},
+        ]
+        df = pd.DataFrame(rows)
+        goal = {"title": "House Downpayment", "target_amount": 5000000, "current_saved": 0, "target_date": "2026-06-01"}
+        results = run_pattern_detection(df, salary_day=1, monthly_salary=60000.0, goals=[goal])
+
+        warnings = [r for r in results if r["type"] == "warning"]
+        assert len(warnings) >= 1
+        subtypes = {w["subtype"] for w in warnings}
+        assert "savings_decline" in subtypes or "goal_delay_risk" in subtypes
+
 
 
