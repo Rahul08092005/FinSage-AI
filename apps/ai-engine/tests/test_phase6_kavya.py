@@ -608,6 +608,8 @@ from app.analytics.pattern_engine import (
     detect_time_of_month_patterns,
     detect_salary_triggered_spending,
     detect_category_trend,
+    detect_recurring_subscriptions,
+    detect_money_leaks,
     run_pattern_detection,
 )
 
@@ -750,42 +752,196 @@ class TestPatternEngineCategoryTrend:
         assert detect_category_trend(None, category="Transport") is None
 
 
-class TestRunPatternDetection:
-    """Verification for run_pattern_detection() orchestration."""
+# ===========================================================================
+# Step 4.2 Unit Tests: Subscriptions & Money Leaks
+# ===========================================================================
 
-    def test_runs_all_detectors_and_combines_output(self):
-        """Combines time-of-month, salary-triggered, and category trend patterns."""
+
+class TestDetectRecurringSubscriptions:
+    """Verification for detect_recurring_subscriptions()."""
+
+    def test_identifies_3_months_netflix_charge(self):
+        """3 months of identical Rs.649 charge is detected as a subscription."""
         rows = [
-            # Salary on day 1
+            {"date": "2026-01-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            {"date": "2026-02-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            {"date": "2026-03-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+        ]
+        df = pd.DataFrame(rows)
+        subscriptions = detect_recurring_subscriptions(df)
+
+        assert len(subscriptions) == 1
+        sub = subscriptions[0]
+        assert sub["type"] == "subscription"
+        assert sub["merchant"].lower() == "netflix"
+        assert sub["amount"] == 649.0
+        assert sub["occurrences"] == 3
+        assert sub["estimated_annual_cost"] == pytest.approx(7788.0, abs=0.01)
+        assert "evidence" in sub
+        assert "transactions" in sub
+        assert len(sub["transactions"]) == 3
+
+    def test_tolerance_within_plus_minus_5_days(self):
+        """Cadence intervals within 25 to 35 days qualify for monthly subscription."""
+        rows = [
+            {"date": "2026-01-01", "amount": 199.0, "description": "Spotify Premium"},
+            {"date": "2026-01-28", "amount": 199.0, "description": "Spotify Premium"},  # 27 days
+            {"date": "2026-03-03", "amount": 199.0, "description": "Spotify Premium"},  # 34 days
+        ]
+        df = pd.DataFrame(rows)
+        subscriptions = detect_recurring_subscriptions(df)
+        assert len(subscriptions) == 1
+        assert subscriptions[0]["occurrences"] == 3
+        assert subscriptions[0]["estimated_annual_cost"] == pytest.approx(199.0 * 12, abs=0.01)
+
+    def test_irregular_cadence_not_detected(self):
+        """Transactions on random or daily dates are not flagged as subscriptions."""
+        rows = [
+            {"date": "2026-01-01", "amount": 100.0, "description": "Tea Stall"},
+            {"date": "2026-01-02", "amount": 100.0, "description": "Tea Stall"},
+            {"date": "2026-01-03", "amount": 100.0, "description": "Tea Stall"},
+        ]
+        df = pd.DataFrame(rows)
+        subscriptions = detect_recurring_subscriptions(df)
+        assert subscriptions == []
+
+    def test_under_3_occurrences_not_detected(self):
+        """Only 2 occurrences is below the 3+ requirement."""
+        rows = [
+            {"date": "2026-01-15", "amount": 499.0, "description": "Hotstar"},
+            {"date": "2026-02-15", "amount": 499.0, "description": "Hotstar"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_recurring_subscriptions(df) == []
+
+    def test_one_off_large_purchase_never_subscription(self):
+        """A single large purchase is never flagged as a subscription."""
+        rows = [
+            {"date": "2026-01-10", "amount": 55000.0, "description": "Apple Store Mumbai", "category": "Electronics"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_recurring_subscriptions(df) == []
+
+    def test_upi_and_pos_prefix_normalization(self):
+        """Strips UPI/POS noise and correctly groups same merchant."""
+        rows = [
+            {"date": "2026-01-10", "amount": 299.0, "description": "UPI-Amazon Prime/12345"},
+            {"date": "2026-02-10", "amount": 299.0, "description": "UPI/Amazon Prime/67890"},
+            {"date": "2026-03-10", "amount": 299.0, "description": "Amazon Prime"},
+        ]
+        df = pd.DataFrame(rows)
+        subs = detect_recurring_subscriptions(df)
+        assert len(subs) == 1
+        assert "amazon prime" in subs[0]["merchant"].lower()
+        assert subs[0]["occurrences"] == 3
+
+
+class TestDetectMoneyLeaks:
+    """Verification for detect_money_leaks()."""
+
+    def test_detects_small_food_transactions_leak(self):
+        """Many small Food transactions exceeding 15% share is reported as a leak."""
+        rows = [
+            # 10 small Food transactions under ₹200 (₹150 * 10 = ₹1,500 total)
+            {"date": f"2026-01-{i+1:02d}", "amount": 150.0, "category": "Food"}
+            for i in range(10)
+        ]
+        df = pd.DataFrame(rows)
+        leaks = detect_money_leaks(df, threshold=200.0)
+
+        assert len(leaks) == 1
+        leak = leaks[0]
+        assert leak["type"] == "leak"
+        assert leak["category"] == "Food"
+        assert leak["count"] == 10
+        assert leak["total"] == 1500.0
+        # 1 month: 1500 * 12 = 18000 annual spend -> 30% reduction = 5400
+        assert leak["projected_annual_savings_at_30pct_reduction"] == pytest.approx(5400.0, abs=1.0)
+        assert "evidence" in leak
+        assert "transactions" in leak
+        assert len(leak["transactions"]) == 10
+
+    def test_small_transactions_under_15pct_share_ignored(self):
+        """Small transactions that form < 15% of category spend are not flagged."""
+        rows = [
+            # 1 massive grocery run of ₹10,000 + 3 ₹50 snacks = ₹10,150 total
+            {"date": "2026-01-05", "amount": 10000.0, "category": "Groceries"},
+            {"date": "2026-01-10", "amount": 50.0, "category": "Groceries"},
+            {"date": "2026-01-15", "amount": 50.0, "category": "Groceries"},
+            {"date": "2026-01-20", "amount": 50.0, "category": "Groceries"},
+        ]
+        df = pd.DataFrame(rows)
+        # Small share = 150 / 10150 ≈ 1.48% (< 15%)
+        leaks = detect_money_leaks(df, threshold=200.0)
+        assert leaks == []
+
+    def test_one_off_large_purchase_never_leak(self):
+        """A single large purchase is never misclassified as a money leak."""
+        rows = [
+            {"date": "2026-01-10", "amount": 75000.0, "category": "Jewellery"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_money_leaks(df) == []
+
+    def test_empty_or_none_returns_empty_list(self):
+        """Empty or None input returns empty list."""
+        assert detect_money_leaks(pd.DataFrame()) == []
+        assert detect_money_leaks(None) == []
+
+
+class TestRunPatternDetection:
+    """Verification for run_pattern_detection() orchestration across all 5 insight types."""
+
+    def test_runs_all_5_detectors_and_combines_output(self):
+        """Combines time-of-month, salary-triggered, category trend, subscription, and leak."""
+        rows = [
+            # 1. Salary on day 1
             {"date": "2026-01-01", "amount": 80000.0, "category": "Salary"},
-            # Salary triggered shopping in days 2-6
+            # 2. Post-salary discretionary surge (Shopping days 2-6)
             {"date": "2026-01-02", "amount": 2500.0, "category": "Shopping"},
             {"date": "2026-01-03", "amount": 2500.0, "category": "Shopping"},
-            # End of month Food spike (late bucket)
-            {"date": "2026-01-05", "amount": 50.0, "category": "Food"},
-            {"date": "2026-01-15", "amount": 50.0, "category": "Food"},
-            {"date": "2026-01-25", "amount": 1500.0, "category": "Food"},
-            {"date": "2026-01-28", "amount": 1500.0, "category": "Food"},
-            # Upward Transport trend across 4 months
+            # 3. Upward Transport trend across 4 months
             {"date": "2026-01-10", "amount": 1000.0, "category": "Transport"},
             {"date": "2026-02-10", "amount": 1300.0, "category": "Transport"},
             {"date": "2026-03-10", "amount": 1600.0, "category": "Transport"},
             {"date": "2026-04-10", "amount": 1900.0, "category": "Transport"},
+            # 4. Recurring subscription (Netflix Rs.649 across 3 months)
+            {"date": "2026-01-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            {"date": "2026-02-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            {"date": "2026-03-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            # 5. Money leaks: small Food transactions (<= 200, 100% share of Food)
+            {"date": "2026-01-22", "amount": 120.0, "category": "Food"},
+            {"date": "2026-01-23", "amount": 150.0, "category": "Food"},
+            {"date": "2026-01-24", "amount": 180.0, "category": "Food"},
+            {"date": "2026-01-25", "amount": 110.0, "category": "Food"},
         ]
         df = pd.DataFrame(rows)
-        patterns = run_pattern_detection(df, salary_day=1)
+        results = run_pattern_detection(df, salary_day=1)
 
-        assert isinstance(patterns, list)
-        assert len(patterns) >= 2  # catches food spike, transport trend, and salary spike
-        for pat in patterns:
-            assert pat["type"] == "pattern"
-            assert "title" in pat
-            assert "evidence" in pat
-            assert "category" in pat
+        assert isinstance(results, list)
+        types_found = {r["type"] for r in results}
+        assert "pattern" in types_found
+        assert "subscription" in types_found
+        assert "leak" in types_found
+
+        # Verify subscription was detected
+        subs = [r for r in results if r["type"] == "subscription"]
+        assert len(subs) == 1
+        assert subs[0]["merchant"].lower() == "netflix"
+        assert subs[0]["amount"] == 649.0
+        assert subs[0]["estimated_annual_cost"] == 7788.0
+
+        # Verify leak was detected
+        leaks = [r for r in results if r["type"] == "leak"]
+        assert len(leaks) == 1
+        assert leaks[0]["category"] == "Food"
+        assert leaks[0]["count"] == 4
+        assert leaks[0]["total"] == 560.0
 
     def test_empty_or_none_returns_empty_list(self):
         """Returns empty list for empty DataFrame or None."""
         assert run_pattern_detection(pd.DataFrame()) == []
         assert run_pattern_detection(None) == []
         assert run_pattern_detection([]) == []
+
 

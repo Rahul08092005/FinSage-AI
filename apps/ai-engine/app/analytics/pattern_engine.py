@@ -20,6 +20,15 @@ DEFAULT_SALARY_SPEND_THRESHOLD = 0.30    # Post-salary daily spend must be >= 30
 DEFAULT_TREND_MIN_MONTHS = 3            # Minimum months of history required for trend fit
 DEFAULT_TREND_MIN_GROWTH_RATE = 0.05    # Minimum 5% monthly spending growth rate
 
+DEFAULT_SUBSCRIPTION_CADENCE_DAYS = 30
+DEFAULT_SUBSCRIPTION_TOLERANCE_DAYS = 5
+DEFAULT_SUBSCRIPTION_MIN_OCCURRENCES = 3
+
+DEFAULT_MONEY_LEAK_THRESHOLD = 200.0    # ₹200 small-transaction threshold
+DEFAULT_MONEY_LEAK_MIN_SHARE = 0.15     # 15% of category spend
+DEFAULT_MONEY_LEAK_MIN_COUNT = 3        # At least 3 small transactions
+DEFAULT_MONEY_LEAK_REDUCTION_RATE = 0.30  # 30% reduction rate for annual savings
+
 # Typical discretionary categories (wants / flexible spending)
 DEFAULT_DISCRETIONARY_CATEGORIES = {
     "food",
@@ -149,6 +158,39 @@ def _is_discretionary(category: str) -> bool:
         return False
     # If unclassified, default to True for behavioral analysis
     return True
+
+
+def _extract_merchant_name(row: pd.Series | dict) -> tuple[str, str]:
+    """Extract cleaned merchant grouping key and display name from a transaction row.
+
+    Returns:
+        (grouping_key, display_name)
+    """
+    raw_text = ""
+    for col in ["merchant", "description", "payee", "name", "title", "category"]:
+        if col in row and pd.notna(row[col]) and str(row[col]).strip():
+            raw_text = str(row[col]).strip()
+            break
+
+    if not raw_text:
+        raw_text = "Unknown Merchant"
+
+    # Clean text: remove UPI/POS/NACH prefixes and transaction noise
+    cleaned = re.sub(
+        r"^(upi[-/:]|pos[-/:]|mandate[-/:]|nach[-/:]|autopay[-/:]|netbanking[-/:]|neft[-/:]|imps[-/:])\s*",
+        "",
+        raw_text,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # Remove trailing reference IDs like /12345 or @bank or #1234
+    cleaned_base = re.sub(r"(@[a-zA-Z0-9]+|/[0-9a-zA-Z]+|#[0-9]+)$", "", cleaned).strip()
+    if not cleaned_base:
+        cleaned_base = cleaned
+
+    group_key = cleaned_base.lower().strip()
+    display_name = cleaned_base.title() if cleaned_base.islower() else cleaned_base
+    return group_key, display_name
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +411,6 @@ def detect_salary_triggered_spending(
         return None
 
     # Determine which transactions fall in the 5 days after salary day
-    # Day offset (1 to 5) modulo days_in_month
     discretionary["days_in_month"] = discretionary["date"].dt.days_in_month
     discretionary["day"] = discretionary["date"].dt.day
     discretionary["offset"] = (
@@ -514,6 +555,238 @@ def detect_category_trend(
     }
 
 
+def detect_recurring_subscriptions(
+    transactions: pd.DataFrame | list[dict] | None,
+    cadence_tolerance_days: int = DEFAULT_SUBSCRIPTION_TOLERANCE_DAYS,
+    min_occurrences: int = DEFAULT_SUBSCRIPTION_MIN_OCCURRENCES,
+) -> list[dict]:
+    """Identify recurring monthly subscription charges based on cadence and amount consistency.
+
+    Groups transactions by (cleaned description/merchant, rounded amount) and flags
+    groups appearing on a roughly monthly cadence (interval between occurrences within
+    30 +/- cadence_tolerance_days, with at least min_occurrences charges).
+
+    Args:
+        transactions:           DataFrame or list of transactions.
+        cadence_tolerance_days: Allowed deviation from 30-day cadence (default 5 days -> [25, 35]).
+        min_occurrences:        Minimum matching consecutive charges (default 3).
+
+    Returns:
+        List of subscription dicts:
+        [{
+            "type": "subscription",
+            "merchant": str,
+            "amount": float,
+            "occurrences": int,
+            "estimated_annual_cost": float,
+            "evidence": dict,
+            "transactions": list[dict]
+        }]
+    """
+    df = _normalize_transactions_df(transactions)
+    if df.empty:
+        return []
+
+    expenses = df[df["amount"] > 0].copy()
+    if expenses.empty or len(expenses) < min_occurrences:
+        return []
+
+    # Assign merchant info and rounded amount
+    merchant_info = expenses.apply(_extract_merchant_name, axis=1)
+    expenses["merchant_key"] = [info[0] for info in merchant_info]
+    expenses["merchant_display"] = [info[1] for info in merchant_info]
+    expenses["rounded_amount"] = expenses["amount"].round(2)
+
+    min_interval = DEFAULT_SUBSCRIPTION_CADENCE_DAYS - cadence_tolerance_days  # 25
+    max_interval = DEFAULT_SUBSCRIPTION_CADENCE_DAYS + cadence_tolerance_days  # 35
+
+    subscriptions: list[dict] = []
+
+    for (m_key, r_amt), group in expenses.groupby(["merchant_key", "rounded_amount"]):
+        if len(group) < min_occurrences:
+            continue
+
+        sorted_group = group.sort_values("date")
+        dates = sorted_group["date"].tolist()
+
+        # Find the longest chain of transactions where each consecutive step is within [25, 35] days
+        chain = [0]
+        valid_chains = []
+
+        for i in range(len(dates) - 1):
+            gap = (dates[i + 1] - dates[i]).days
+            if min_interval <= gap <= max_interval:
+                if not chain or chain[-1] == i:
+                    chain.append(i + 1)
+                else:
+                    if len(chain) >= min_occurrences:
+                        valid_chains.append(list(chain))
+                    chain = [i, i + 1]
+            else:
+                if len(chain) >= min_occurrences:
+                    valid_chains.append(list(chain))
+                chain = [i + 1]
+
+        if len(chain) >= min_occurrences:
+            valid_chains.append(list(chain))
+
+        if not valid_chains:
+            continue
+
+        # Take the longest valid chain
+        best_chain_indices = max(valid_chains, key=len)
+        matched_txs = sorted_group.iloc[best_chain_indices]
+
+        matched_dates = matched_txs["date"].tolist()
+        intervals = [
+            (matched_dates[k + 1] - matched_dates[k]).days
+            for k in range(len(matched_dates) - 1)
+        ]
+        avg_interval = float(np.mean(intervals)) if intervals else 30.0
+
+        sub_amount = float(matched_txs["amount"].iloc[0])
+        merchant_name = str(matched_txs["merchant_display"].iloc[0])
+        count = len(matched_txs)
+        est_annual = round(sub_amount * 12.0, 2)
+
+        tx_records = []
+        for _, row in matched_txs.iterrows():
+            tx_dict = {
+                "date": row["date"].strftime("%Y-%m-%d"),
+                "amount": float(row["amount"]),
+                "category": str(row.get("category", "General")),
+            }
+            if "description" in row and pd.notna(row["description"]):
+                tx_dict["description"] = str(row["description"])
+            tx_records.append(tx_dict)
+
+        subscriptions.append({
+            "type": "subscription",
+            "merchant": merchant_name,
+            "amount": sub_amount,
+            "occurrences": count,
+            "estimated_annual_cost": est_annual,
+            "evidence": {
+                "merchant": merchant_name,
+                "amount": sub_amount,
+                "occurrences": count,
+                "estimated_annual_cost": est_annual,
+                "cadence_days_tolerance": cadence_tolerance_days,
+                "average_interval_days": round(avg_interval, 1),
+                "intervals_days": intervals,
+                "transaction_dates": [d.strftime("%Y-%m-%d") for d in matched_dates],
+            },
+            "transactions": tx_records,
+        })
+
+    return subscriptions
+
+
+def detect_money_leaks(
+    transactions: pd.DataFrame | list[dict] | None,
+    threshold: float = DEFAULT_MONEY_LEAK_THRESHOLD,
+    min_share: float = DEFAULT_MONEY_LEAK_MIN_SHARE,
+    min_count: int = DEFAULT_MONEY_LEAK_MIN_COUNT,
+) -> list[dict]:
+    """Aggregate small-transaction 'money leaks' and report categories with high leakage.
+
+    Filters transactions with amount <= threshold, groups by category, and if the total
+    across small transactions exceeds a meaningful share (min_share, default 15%) of that
+    category's total spend, flags it as a money leak.
+
+    Args:
+        transactions: DataFrame or list of transactions.
+        threshold:    Upper limit for small transactions in INR (default ₹200).
+        min_share:    Minimum share of total category spend required (default 0.15 = 15%).
+        min_count:    Minimum number of small transactions required (default 3).
+
+    Returns:
+        List of leak dicts:
+        [{
+            "type": "leak",
+            "category": str,
+            "count": int,
+            "total": float,
+            "projected_annual_savings_at_30pct_reduction": float,
+            "evidence": dict,
+            "transactions": list[dict]
+        }]
+    """
+    df = _normalize_transactions_df(transactions)
+    if df.empty:
+        return []
+
+    expenses = df[df["amount"] > 0].copy()
+    if expenses.empty:
+        return []
+
+    # Number of unique months in dataset for annualization
+    unique_months = expenses["date"].dt.to_period("M").nunique()
+    months_count = max(1, unique_months)
+
+    leaks: list[dict] = []
+
+    for cat, group in expenses.groupby("category"):
+        cat_str = str(cat).strip()
+        if not cat_str or cat_str.lower() in ("salary", "income"):
+            continue
+
+        cat_total = float(group["amount"].sum())
+        if cat_total <= 0:
+            continue
+
+        small_txs = group[group["amount"] <= threshold].sort_values("date")
+        small_count = len(small_txs)
+        small_total = float(small_txs["amount"].sum())
+
+        if small_count < min_count or small_total <= 0:
+            continue
+
+        share = small_total / cat_total
+        if share < min_share:
+            continue
+
+        # Annualize leak rate based on active dataset horizon
+        monthly_leak_rate = small_total / months_count
+        annual_leak_rate = monthly_leak_rate * 12.0
+        projected_savings = round(annual_leak_rate * DEFAULT_MONEY_LEAK_REDUCTION_RATE, 2)
+
+        tx_records = []
+        for _, row in small_txs.iterrows():
+            tx_dict = {
+                "date": row["date"].strftime("%Y-%m-%d"),
+                "amount": float(row["amount"]),
+                "category": cat_str,
+            }
+            if "description" in row and pd.notna(row["description"]):
+                tx_dict["description"] = str(row["description"])
+            tx_records.append(tx_dict)
+
+        leaks.append({
+            "type": "leak",
+            "category": cat_str,
+            "count": small_count,
+            "total": round(small_total, 2),
+            "projected_annual_savings_at_30pct_reduction": projected_savings,
+            "evidence": {
+                "category": cat_str,
+                "threshold": threshold,
+                "small_transaction_count": small_count,
+                "small_transaction_total": round(small_total, 2),
+                "category_total_spend": round(cat_total, 2),
+                "share_of_category_spend_pct": round(share * 100, 1),
+                "min_share_threshold": min_share,
+                "months_analyzed": months_count,
+                "monthly_leak_rate": round(monthly_leak_rate, 2),
+                "annual_leak_rate": round(annual_leak_rate, 2),
+                "projected_annual_savings_at_30pct_reduction": projected_savings,
+            },
+            "transactions": tx_records,
+        })
+
+    return leaks
+
+
 # ---------------------------------------------------------------------------
 # Top-Level Orchestration
 # ---------------------------------------------------------------------------
@@ -530,13 +803,12 @@ def run_pattern_detection(
         salary_day:   Optional day-of-month when salary arrives (e.g. from user profile).
 
     Returns:
-        List of pattern dicts shaped:
-        {
-            "type": "pattern",
-            "title": <short human sentence>,
-            "evidence": {...numbers...},
-            "category": str | None
-        }
+        List of pattern and insight dicts covering:
+        1. Time-of-month spending concentration (type: "pattern")
+        2. Post-salary discretionary surge (type: "pattern")
+        3. Upward category trends (type: "pattern")
+        4. Recurring subscriptions (type: "subscription")
+        5. Money leaks (type: "leak")
     """
     df = _normalize_transactions_df(transactions)
     if df.empty:
@@ -564,4 +836,33 @@ def run_pattern_detection(
             if trend is not None:
                 patterns.append(trend)
 
+    # 4. Recurring subscriptions
+    subscriptions = detect_recurring_subscriptions(df)
+    patterns.extend(subscriptions)
+
+    # 5. Money leaks / small transaction leakage
+    leaks = detect_money_leaks(df)
+    patterns.extend(leaks)
+
     return patterns
+
+
+__all__ = [
+    "DEFAULT_TIME_OF_MONTH_THRESHOLD",
+    "DEFAULT_SALARY_SPEND_THRESHOLD",
+    "DEFAULT_TREND_MIN_MONTHS",
+    "DEFAULT_TREND_MIN_GROWTH_RATE",
+    "DEFAULT_SUBSCRIPTION_CADENCE_DAYS",
+    "DEFAULT_SUBSCRIPTION_TOLERANCE_DAYS",
+    "DEFAULT_SUBSCRIPTION_MIN_OCCURRENCES",
+    "DEFAULT_MONEY_LEAK_THRESHOLD",
+    "DEFAULT_MONEY_LEAK_MIN_SHARE",
+    "DEFAULT_MONEY_LEAK_MIN_COUNT",
+    "DEFAULT_MONEY_LEAK_REDUCTION_RATE",
+    "detect_time_of_month_patterns",
+    "detect_salary_triggered_spending",
+    "detect_category_trend",
+    "detect_recurring_subscriptions",
+    "detect_money_leaks",
+    "run_pattern_detection",
+]
