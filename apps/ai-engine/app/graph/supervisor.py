@@ -83,6 +83,8 @@ class SupervisorAgent(BaseAgent):
         if any(kw in msg_lower for kw in BUDGET_KEYWORDS):
             tx_data = state.get("transactions_json") or ""
             rec = get_budget_recommendation.invoke({"transactions_json": tx_data})
+            from app.agents.budget_agent import build_budget_reasoning_trace
+            state["reasoning_trace"] = build_budget_reasoning_trace(tx_data, rec)
             prompt = "User request: " + str(message) + "\nBudget Recommendations: " + str(rec) + "\nProvide actionable budget advice in INR (₹)."
             answer = generate(
                 prompt,
@@ -108,6 +110,8 @@ class SupervisorAgent(BaseAgent):
                 "transactions_json": tx_data,
                 "monthly_salary": monthly_salary,
             })
+            from app.agents.goal_agent import build_goal_reasoning_trace
+            state["reasoning_trace"] = build_goal_reasoning_trace(progress, tx_data)
             prompt = "User request: " + str(message) + "\nGoal Progress: " + str(progress) + "\nProvide motivating goal tracking insight in INR (₹)."
             answer = generate(
                 prompt,

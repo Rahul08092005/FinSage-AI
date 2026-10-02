@@ -1,6 +1,12 @@
 """Pydantic schemas for AI Engine endpoints."""
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from pydantic import BaseModel
+
+
+class ReasoningTrace(BaseModel):
+    evidence: List[str] = []
+    calculation: str
+    confidence: Literal["high", "medium", "low"]
 
 
 class OrchestrateRequest(BaseModel):
@@ -31,6 +37,7 @@ class OrchestrateResponse(BaseModel):
     citations: Optional[List[str]] = []
     metrics: Optional[Dict[str, Any]] = {}
     guru_perspectives: Optional[List[GuruPerspective]] = None
+    reasoning_trace: Optional[ReasoningTrace] = None
 
 
 class ForecastRequest(BaseModel):

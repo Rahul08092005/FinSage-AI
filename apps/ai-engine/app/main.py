@@ -91,6 +91,7 @@ def orchestrate(req: OrchestrateRequest):
         citations=result.get("citations", []),
         metrics=result.get("metrics", {}),
         guru_perspectives=result.get("guru_perspectives"),
+        reasoning_trace=result.get("reasoning_trace"),
     )
 
 

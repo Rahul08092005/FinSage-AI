@@ -10,9 +10,22 @@ def calculate_budget_recommendation(transactions_json: Optional[str] = "") -> di
         return {"suggested_monthly_budget": {}, "total_recommended_budget": 0.0}
 
     try:
+        import io
+        import pandas as pd
         from app.analytics.spending import calculate_monthly_spending
-        from app.analytics.csv_parser import parse_transactions_csv
-        df = parse_transactions_csv(transactions_json.encode("utf-8"))
+
+        if isinstance(transactions_json, (list, dict)):
+            df = pd.DataFrame(transactions_json if isinstance(transactions_json, list) else [transactions_json])
+        elif isinstance(transactions_json, str) and (transactions_json.strip().startswith("[") or transactions_json.strip().startswith("{")):
+            try:
+                df = pd.read_json(io.StringIO(transactions_json))
+            except Exception:
+                data = json.loads(transactions_json)
+                df = pd.DataFrame(data if isinstance(data, list) else [data])
+        else:
+            from app.analytics.csv_parser import parse_transactions_csv
+            df = parse_transactions_csv(transactions_json.encode("utf-8"))
+
         summary = calculate_monthly_spending(df)
         cat_spending = summary.get("by_category", {})
         
