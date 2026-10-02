@@ -1,6 +1,7 @@
 // Person 1 (Aditi) owns this file.
 // Phase 2: adds Account, Transaction, Budget, Goal on top of the Phase 1 User model.
 // Phase 3+ adds Document, AdvisorSession, HealthScore, etc. per the ERD.
+// Phase 5: adds taxRegime and annualIncome to User for Financial Plan support.
 
 generator client {
   provider = "prisma-client-js"
@@ -17,6 +18,10 @@ model User {
   email         String        @unique
   password      String
   monthlySalary Decimal?
+  // Phase 5: tax profile fields — nullable so existing users are unaffected.
+  // taxRegime must be 'old' or 'new' (enforced at the API layer, not the DB layer).
+  taxRegime    String?
+  annualIncome Decimal?
   createdAt     DateTime      @default(now())
 
   accounts     Account[]

@@ -46,9 +46,12 @@ class OCRAdapter(BaseIntegrationAdapter):
                 import concurrent.futures
                 import winocr
 
+                # Ensure image is in RGBA mode for Windows OCR
+                target_img = img.convert("RGBA") if img.mode != "RGBA" else img
+
                 # Run in worker thread to prevent conflict with running asyncio event loops in FastAPI
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    res = executor.submit(winocr.recognize_pil_sync, img).result(timeout=15)
+                    res = executor.submit(winocr.recognize_pil_sync, target_img).result(timeout=15)
                 text = (res.get("text") or "").strip()
                 if text:
                     logger.info(f"[OCR] WinOCR extracted {len(text)} chars")
@@ -92,6 +95,14 @@ class OCRAdapter(BaseIntegrationAdapter):
                 thresh_text = self.extract_text_from_pil(thresh_img)
                 if len(thresh_text.strip()) > len(text.strip()):
                     text = thresh_text
+
+            # If still sparse, try original image directly without preprocessing
+            if len(text.strip()) < 15:
+                logger.info("[OCR] Trying raw image directly without preprocessing...")
+                raw_img = Image.open(image_path)
+                raw_text = self.extract_text_from_pil(raw_img)
+                if len(raw_text.strip()) > len(text.strip()):
+                    text = raw_text
 
             if text.strip():
                 return text.strip()

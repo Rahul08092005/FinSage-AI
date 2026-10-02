@@ -11,7 +11,7 @@ interface MoneyMoveCardProps {
 
 export function MoneyMoveCard({ salary, spend }: MoneyMoveCardProps) {
   const moneyIn = salary ?? 100000;
-  const moneyOut = spend ?? 71816;
+  const moneyOut = spend ?? 0;
   const retained = Math.max(0, moneyIn - moneyOut);
   const savingsRate = moneyIn > 0 ? ((retained / moneyIn) * 100).toFixed(1) : "28.2";
   const recommendedBuffer = Math.round(retained * 0.55);

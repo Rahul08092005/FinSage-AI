@@ -5,15 +5,25 @@ from app.agents.document_agent import DocumentAgent
 from app.agents.expense_agent import ExpenseAgent
 from app.agents.analytics_agent import AnalyticsAgent
 from app.agents.rag_advisor_agent import RAGAdvisorAgent
+from app.agents.guru_agent import GuruAgent
 from app.tools.budgeting_tools import get_budget_recommendation
 from app.tools.goal_tools import track_goal_progress
 from app.tools.analytics_tools import get_spending_summary
 from app.tools.tax_advice_tools import get_tax_savings_advice
 from app.services.llm_client import generate
 
-SPENDING_KEYWORDS = ["spent", "spending", "total", "expense", "transaction", "purchased", "cost", "spend"]
+SPENDING_KEYWORDS = [
+    "spent", "spending", "total", "expense", "transaction", "purchased", 
+    "cost", "spend", "doing", "month", "status", "overview", "summary", 
+    "finances", "money", "how am i", "health"
+]
 ANALYTICS_KEYWORDS = ["breakdown", "analytics", "distribution", "category split", "pie"]
 TAX_KEYWORDS = ["tax", "ppf", "elss", "sip", "80c", "save on taxes"]
+GURU_KEYWORDS = [
+    "guru", "compare philosophy", "buffett", "munger", "bogle",
+    "graham", "lynch", "dalio", "marks", "fisher",
+    "investment philosophy", "which investor", "philosophy", "investor philosophy"
+]
 FINANCE_KNOWLEDGE_KEYWORDS = ["what is", "explain", "invest", "itr", "deduction", "mutual fund"]
 BUDGET_KEYWORDS = ["budget", "recommend", "how much should i spend", "limit", "target spend"]
 GOAL_KEYWORDS = ["goal", "saving for", "progress", "target date", "save"]
@@ -61,51 +71,92 @@ class SupervisorAgent(BaseAgent):
             state["metrics"] = rec.get("raw_numbers", {})
             return state
 
-        # Branch 2: Budgeting recommendation
+        # Branch 3: Budgeting recommendation
         if any(kw in msg_lower for kw in BUDGET_KEYWORDS):
             tx_data = state.get("transactions_json") or ""
             rec = get_budget_recommendation.invoke({"transactions_json": tx_data})
-            prompt = "User request: " + str(message) + "\nBudget Recommendations: " + str(rec) + "\nProvide actionable budget advice."
-            answer = generate(prompt, system="You are the Budget Advisor Agent for FinSage AI.")
+            prompt = "User request: " + str(message) + "\nBudget Recommendations: " + str(rec) + "\nProvide actionable budget advice in INR (₹)."
+            answer = generate(
+                prompt,
+                system=(
+                    "You are the Budget Advisor Agent for FinSage AI in India. "
+                    "All currency figures are in Indian Rupees (INR, ₹). Always format currency with ₹. "
+                    "Provide actionable, direct, and encouraging advice."
+                ),
+            )
             state["answer"] = answer
             state["agent_path"].append("budgeting_tool")
             state["citations"] = []
             return state
 
-        # Branch 3: Goal tracking
+        # Branch 4: Goal tracking
         if any(kw in msg_lower for kw in GOAL_KEYWORDS):
             goals_json = state.get("goals_json") or "[]"
             tx_data = state.get("transactions_json") or ""
-            progress = track_goal_progress.invoke({"goals_json": goals_json, "transactions_json": tx_data})
-            prompt = "User request: " + str(message) + "\nGoal Progress: " + str(progress) + "\nProvide motivating goal tracking insight."
-            answer = generate(prompt, system="You are the Financial Goal Tracking Agent for FinSage AI.")
+            income = state.get("income") or state.get("total_income")
+            monthly_salary = (float(income) / 12.0) if income else None
+            progress = track_goal_progress.invoke({
+                "goals_json": goals_json,
+                "transactions_json": tx_data,
+                "monthly_salary": monthly_salary,
+            })
+            prompt = "User request: " + str(message) + "\nGoal Progress: " + str(progress) + "\nProvide motivating goal tracking insight in INR (₹)."
+            answer = generate(
+                prompt,
+                system=(
+                    "You are the Financial Goal Tracking Agent for FinSage AI in India. "
+                    "All currency figures are in Indian Rupees (INR, ₹). Always format currency with ₹. "
+                    "Provide motivating goal tracking insight."
+                ),
+            )
             state["answer"] = answer
             state["agent_path"].append("goal_tool")
             state["citations"] = []
             return state
 
-        # Branch 4: Analytics (category breakdown)
+        # Branch 5: Analytics (category breakdown)
         if any(kw in msg_lower for kw in ANALYTICS_KEYWORDS) and state.get("transactions_json"):
             agent = AnalyticsAgent()
             return agent.run(state)
 
-        # Branch 5: Expense summary
+        # Branch 6: Expense summary
         if any(kw in msg_lower for kw in SPENDING_KEYWORDS):
             if state.get("transactions_json"):
                 agent = ExpenseAgent()
                 return agent.run(state)
 
-        # Branch 6: RAG Advisor when finance knowledge query and no transactions_json
+        # Branch 7: Multi-Guru financial philosophy comparison
+        if state.get("domain") == "guru_philosophy" or any(kw in msg_lower for kw in GURU_KEYWORDS):
+            agent = GuruAgent()
+            return agent.run(state)
+
+        # Branch 8: RAG Advisor when finance knowledge query and no transactions_json
         if any(kw in msg_lower for kw in FINANCE_KNOWLEDGE_KEYWORDS) and not state.get("transactions_json"):
             agent = RAGAdvisorAgent()
             return agent.run(state)
 
-        # Default fallback: Supervisor direct LLM response
+
+        # Default fallback: Supervisor direct LLM response grounded in real transactions
+        summary = ""
+        if state.get("transactions_json"):
+            try:
+                from app.tools.analytics_tools import get_spending_summary
+                summary_data = get_spending_summary.invoke({"transactions_json": state.get("transactions_json")})
+                summary = f"Current User Financial Data: {summary_data}\n"
+            except Exception:
+                pass
+
+        fallback_prompt = (
+            f"{summary}User query: {message}\n"
+            "Answer the user directly and helpfully based on their current numbers in Indian Rupees (INR, ₹)."
+        )
         answer = generate(
-            prompt=message,
+            prompt=fallback_prompt,
             system=(
-                "You are the FinSage AI supervisor agent. "
-                "Provide a helpful financial assistant response."
+                "You are the FinSage AI supervisor agent in India. "
+                "All currency figures are in Indian Rupees (INR, ₹). Always format currency as ₹ with Indian numbering (e.g. ₹1,850, ₹10,000, ₹1,00,000). "
+                "Never use USD or dollar signs ($). "
+                "Provide a helpful, direct financial assistant response grounded in the user's actual data."
             ),
         )
         state["answer"] = answer

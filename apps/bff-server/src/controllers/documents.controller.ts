@@ -26,7 +26,7 @@ export async function uploadDocument(req: AuthedRequest, res: Response) {
     return res.status(400).json({ error: `docType must be one of: ${allowedDocTypes.join(", ")}` });
   }
 
-  const fileUrl = req.file.path; // e.g. uploads/1234567890-myreceipt.png
+  const fileUrl = path.resolve(req.file.path);
 
   const doc = await prisma.document.create({
     data: {
@@ -92,6 +92,9 @@ export async function getDocument(req: AuthedRequest, res: Response) {
   let category = "Other";
   let description = doc.title;
 
+  let payment_mode = null;
+  let payment_details = null;
+
   if (doc.extractedJson && Array.isArray(doc.extractedJson) && doc.extractedJson.length > 0) {
     const first: any = doc.extractedJson[0];
     merchant = first.merchant || null;
@@ -100,6 +103,8 @@ export async function getDocument(req: AuthedRequest, res: Response) {
     currency = first.currency || "INR";
     category = first.category || "Other";
     description = first.description || first.merchant || doc.title;
+    payment_mode = first.payment_mode || first.paymentMode || null;
+    payment_details = first.payment_details || first.paymentDetails || null;
   }
 
   res.json({
@@ -116,6 +121,8 @@ export async function getDocument(req: AuthedRequest, res: Response) {
     currency,
     category,
     description,
+    payment_mode,
+    payment_details,
   });
 }
 
@@ -137,6 +144,7 @@ const confirmRowSchema = z.object({
     .min(1)
     .max(500, { message: "Description must be 500 characters or fewer" }),
   accountId: z.string().optional(),
+  paymentMode: z.string().optional(),
 });
 
 const confirmSchema = z.object({
@@ -231,4 +239,43 @@ export async function importCsv(req: AuthedRequest, res: Response) {
   });
 
   res.status(201).json({ count: result.count });
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /api/v1/documents/:id
+// Deletes a document record from PostgreSQL and removes the uploaded file from disk.
+// ---------------------------------------------------------------------------
+export async function deleteDocument(req: AuthedRequest, res: Response) {
+  const { id } = req.params;
+
+  const doc = await prisma.document.findFirst({
+    where: { id, userId: req.userId },
+  });
+
+  if (!doc) {
+    return res.status(404).json({ error: "Document not found" });
+  }
+
+  // Delete from database
+  await prisma.document.delete({
+    where: { id },
+  });
+
+  // Clean up physical file on disk if exists (skip if sample file)
+  if (doc.fileUrl && !doc.fileUrl.includes("sample-")) {
+    try {
+      if (fs.existsSync(doc.fileUrl)) {
+        fs.unlinkSync(doc.fileUrl);
+        console.log(`[deleteDocument] Removed local file: ${doc.fileUrl}`);
+      }
+    } catch (fileErr: any) {
+      console.warn(`[deleteDocument] Failed to remove file ${doc.fileUrl}:`, fileErr.message);
+    }
+  }
+
+  console.log(
+    `[AUDIT] userId=${req.userId} action=document.delete documentId=${id} timestamp=${new Date().toISOString()}`
+  );
+
+  return res.status(200).json({ success: true, message: "Document deleted successfully" });
 }

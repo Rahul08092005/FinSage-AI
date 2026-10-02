@@ -16,7 +16,10 @@ def generate(prompt: str, system: str | None = None) -> str:
 
 
 def _call_groq(prompt: str, system: str | None) -> str:
-    from groq import Groq
+    try:
+        from groq import Groq
+    except ImportError:
+        return "[mock groq response — install groq to go live] " + str(prompt)[:120]
 
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:

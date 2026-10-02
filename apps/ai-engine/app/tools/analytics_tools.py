@@ -3,7 +3,10 @@ import io
 import json
 from typing import Any
 import pandas as pd
-from langchain.tools import tool
+try:
+    from langchain_core.tools import tool
+except ImportError:
+    from langchain.tools import tool
 
 from app.analytics.spending import calculate_monthly_spending
 

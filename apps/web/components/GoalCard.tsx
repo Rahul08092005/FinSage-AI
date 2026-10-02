@@ -66,6 +66,9 @@ export function GoalCard({ token }: { token: string }) {
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [selectedGoal, setSelectedGoal] = useState<GoalItem | null>(null);
   const [contributionInput, setContributionInput] = useState("");
+  const [confirmingAmount, setConfirmingAmount] = useState<number | null>(null);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isConfirmingReset, setIsConfirmingReset] = useState(false);
 
   // New goal form state
   const [form, setForm] = useState({ title: "", targetAmount: "", endDate: "" });
@@ -77,6 +80,14 @@ export function GoalCard({ token }: { token: string }) {
   function showMessage(msg: string) {
     setMessage(msg);
     setTimeout(() => setMessage(null), 2500);
+  }
+
+  function closeDetailModal() {
+    setSelectedGoal(null);
+    setConfirmingAmount(null);
+    setContributionInput("");
+    setIsConfirmingDelete(false);
+    setIsConfirmingReset(false);
   }
 
   async function load() {
@@ -122,7 +133,7 @@ export function GoalCard({ token }: { token: string }) {
     try {
       await deleteGoal(token, id);
       if (selectedGoal?.id === id) {
-        setSelectedGoal(null);
+        closeDetailModal();
       }
       showMessage("Mission Retired");
       load();
@@ -139,6 +150,15 @@ export function GoalCard({ token }: { token: string }) {
     setSavingsVersion((v) => v + 1);
     showMessage(`Added ${formatINR(delta)} to mission!`);
     setContributionInput("");
+    setConfirmingAmount(null);
+  }
+
+  function handleResetContribution(goalId: string) {
+    setGoalSaved(goalId, 0);
+    setSavingsVersion((v) => v + 1);
+    showMessage("Savings reset to ₹0 for this mission");
+    setIsConfirmingReset(false);
+    setConfirmingAmount(null);
   }
 
   // Summary statistics calculated from real goals data
@@ -608,8 +628,8 @@ export function GoalCard({ token }: { token: string }) {
                 </div>
               </div>
               <button
-                onClick={() => setSelectedGoal(null)}
-                className="rounded-full p-1.5 text-stone-400 hover:bg-stone-200/60 hover:text-[#18122B] transition"
+                onClick={closeDetailModal}
+                className="rounded-full p-1.5 text-stone-400 hover:bg-stone-200/60 hover:text-[#18122B] transition cursor-pointer"
               >
                 ✕
               </button>
@@ -698,20 +718,74 @@ export function GoalCard({ token }: { token: string }) {
 
                   {/* Add Money Interactive Section */}
                   <div className="rounded-2xl bg-white p-4 border border-stone-200/70">
-                    <p className="text-[11px] font-bold tracking-wider uppercase text-[#18122B] mb-2">
-                      ✦ ADD SAVINGS TO THIS MISSION
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2 mb-3">
-                      {[500, 1000, 2500, 5000].map((amt) => (
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[11px] font-bold tracking-wider uppercase text-[#18122B]">
+                        ✦ ADD SAVINGS TO THIS MISSION
+                      </p>
+                      {saved > 0 && (
                         <button
-                          key={amt}
                           type="button"
-                          onClick={() => handleAddContribution(selectedGoal.id, amt)}
-                          className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs font-semibold text-[#18122B] hover:bg-lime-400/30 hover:border-lime-500/40 transition cursor-pointer"
+                          onClick={() => {
+                            setIsConfirmingReset(!isConfirmingReset);
+                            setConfirmingAmount(null);
+                          }}
+                          className="text-[10px] font-semibold text-stone-400 hover:text-stone-700 transition cursor-pointer underline"
                         >
-                          + {formatINR(amt)}
+                          Reset Stash
                         </button>
-                      ))}
+                      )}
+                    </div>
+
+                    {isConfirmingReset && (
+                      <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50/80 p-3 animate-in fade-in duration-150">
+                        <p className="text-xs font-semibold text-amber-900">
+                          Reset stashed savings for &ldquo;{selectedGoal.title}&rdquo; back to ₹0?
+                        </p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleResetContribution(selectedGoal.id)}
+                            className="rounded-full bg-amber-700 px-3 py-1 text-xs font-bold text-white hover:bg-amber-800 transition cursor-pointer"
+                          >
+                            Yes, Reset to ₹0
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsConfirmingReset(false)}
+                            className="rounded-full border border-stone-300 bg-white px-3 py-1 text-xs font-semibold text-stone-600 hover:bg-stone-50 transition cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                      {[500, 1000, 2500, 5000].map((amt) => {
+                        const isSelected = confirmingAmount === amt;
+                        return (
+                          <button
+                            key={amt}
+                            type="button"
+                            onClick={() => {
+                              setIsConfirmingReset(false);
+                              if (confirmingAmount === amt) {
+                                setConfirmingAmount(null);
+                              } else {
+                                setConfirmingAmount(amt);
+                                setContributionInput(String(amt));
+                              }
+                            }}
+                            className={`rounded-full border px-3 py-1 text-xs font-semibold transition cursor-pointer ${
+                              isSelected
+                                ? "bg-[#18122B] text-white border-[#18122B] shadow-xs scale-[1.03]"
+                                : "border-stone-200 bg-stone-50 text-[#18122B] hover:bg-lime-400/30 hover:border-lime-500/40"
+                            }`}
+                          >
+                            + {formatINR(amt)}
+                          </button>
+                        );
+                      })}
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -723,7 +797,24 @@ export function GoalCard({ token }: { token: string }) {
                           type="number"
                           placeholder="Custom amount"
                           value={contributionInput}
-                          onChange={(e) => setContributionInput(e.target.value)}
+                          onChange={(e) => {
+                            setContributionInput(e.target.value);
+                            setIsConfirmingReset(false);
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val) && val > 0) {
+                              setConfirmingAmount(val);
+                            } else {
+                              setConfirmingAmount(null);
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              const val = parseFloat(contributionInput);
+                              if (!isNaN(val) && val > 0) {
+                                setConfirmingAmount(val);
+                              }
+                            }
+                          }}
                           className="w-full rounded-xl border border-stone-200 bg-[#FAF7F2] py-1.5 pl-6 pr-3 text-xs text-[#18122B] font-serif font-semibold focus:border-[#18122B] focus:outline-none"
                         />
                       </div>
@@ -732,7 +823,8 @@ export function GoalCard({ token }: { token: string }) {
                         onClick={() => {
                           const val = parseFloat(contributionInput);
                           if (!isNaN(val) && val > 0) {
-                            handleAddContribution(selectedGoal.id, val);
+                            setConfirmingAmount(val);
+                            setIsConfirmingReset(false);
                           }
                         }}
                         disabled={!contributionInput || parseFloat(contributionInput) <= 0}
@@ -741,20 +833,87 @@ export function GoalCard({ token }: { token: string }) {
                         Add Money →
                       </button>
                     </div>
+
+                    {/* Dedicated Confirmation Step */}
+                    {confirmingAmount !== null && confirmingAmount > 0 && (
+                      <div className="mt-3.5 rounded-2xl border-2 border-lime-500/60 bg-[#F7FBF4] p-3.5 shadow-sm animate-in fade-in slide-in-from-top-1 duration-150">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                          <div className="flex items-start gap-2.5">
+                            <span className="text-xl shrink-0 mt-0.5">💰</span>
+                            <div>
+                              <p className="text-[11px] font-bold uppercase tracking-wider text-lime-800">
+                                ✦ Confirm Deposit
+                              </p>
+                              <p className="text-xs text-stone-700 mt-0.5 font-medium">
+                                Confirm: do you want to add{" "}
+                                <span className="font-serif font-bold text-[#18122B] text-sm">
+                                  {formatINR(confirmingAmount)}
+                                </span>{" "}
+                                to &ldquo;{selectedGoal.title}&rdquo;?
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0 sm:self-center">
+                            <button
+                              type="button"
+                              onClick={() => handleAddContribution(selectedGoal.id, confirmingAmount)}
+                              className="rounded-full bg-[#18122B] px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-lime-600 active:scale-95 transition cursor-pointer flex items-center gap-1.5"
+                            >
+                              <span>✓</span>
+                              <span>Confirm Add</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setConfirmingAmount(null);
+                                setContributionInput("");
+                              }}
+                              className="rounded-full border border-stone-300 bg-white px-3.5 py-2 text-xs font-semibold text-stone-600 hover:bg-stone-100 active:scale-95 transition cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Modal Actions */}
                   <div className="flex items-center justify-between pt-2 border-t border-stone-200/80">
+                    {isConfirmingDelete ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-rose-700">Delete mission?</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleDelete(selectedGoal.id);
+                            setIsConfirmingDelete(false);
+                          }}
+                          className="rounded-full bg-rose-600 px-3 py-1 text-xs font-bold text-white hover:bg-rose-700 transition cursor-pointer"
+                        >
+                          Yes, Delete
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsConfirmingDelete(false)}
+                          className="rounded-full border border-stone-300 bg-white px-3 py-1 text-xs font-semibold text-stone-600 hover:bg-stone-50 transition cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setIsConfirmingDelete(true)}
+                        className="rounded-full border border-rose-200 bg-rose-50 px-3.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition cursor-pointer"
+                      >
+                        Delete Mission
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => handleDelete(selectedGoal.id)}
-                      className="rounded-full border border-rose-200 bg-rose-50 px-3.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition cursor-pointer"
-                    >
-                      Delete Mission
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedGoal(null)}
+                      onClick={closeDetailModal}
                       className="rounded-full bg-[#18122B] px-5 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 transition cursor-pointer"
                     >
                       Done

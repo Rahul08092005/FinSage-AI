@@ -16,9 +16,18 @@ class BudgetAgent(BaseAgent):
         prompt = (
             "User request: " + str(message) + "\n"
             "Budget Recommendations: " + str(rec) + "\n"
-            "Provide actionable, clear, and encouraging budget advice."
+            "Provide actionable, clear, and encouraging budget advice directly addressing the user's question."
         )
-        answer = generate(prompt, system="You are the Budget Advisor Agent for FinSage AI.")
+        answer = generate(
+            prompt,
+            system=(
+                "You are the Budget Advisor Agent for FinSage AI in India. "
+                "All currency figures are in Indian Rupees (INR, ₹). "
+                "Always format currency as ₹ with Indian numbering (e.g. ₹1,850, ₹10,000, ₹1,00,000). "
+                "Never use dollar signs ($) or USD. "
+                "Directly and accurately answer the user's specific questions based on their real financial numbers."
+            ),
+        )
 
         state["answer"] = answer
         state["citations"] = []

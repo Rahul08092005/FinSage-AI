@@ -25,15 +25,30 @@ from app.adapters.base_adapter import BaseIntegrationAdapter
 # Kotak, and similar bank SMS wording, but narrow enough to avoid false
 # positives on non-transactional messages.
 
-_AMOUNT_RE = r"(?:Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)"
+# Amount regex matching Rs, Rs., INR, etc.
+_AMOUNT_RE = r"(?:Rs\.?|INR|₹)\s*([\d,]+(?:\.\d{1,2})?)"
 
 _PATTERNS: list[tuple[re.Pattern, str]] = [
     # --- Debit patterns ---
 
+    # "A/c XX7314 debited with INR 780.00 on 20-09-2026 for FRESH MART GROCERY. Ref No: ..."
+    (re.compile(
+        r"(?:A/?c|account|card)\s*[\w*X-]+\s+debited\s+(?:with|by|for)?\s*" + _AMOUNT_RE +
+        r".*?(?:for|to|at|towards)\s+(.+?)(?:\.\s*Ref|\s+Ref|\s+on\s+\d|\s+Txn|\s+Avail|\s*[.\-]|$)",
+        re.IGNORECASE,
+    ), "debit"),
+
+    # "debited with/by INR 780.00 on 20-09-2026 for FRESH MART GROCERY"
+    (re.compile(
+        r"debited\s+(?:with|by|for)\s+" + _AMOUNT_RE +
+        r".*?(?:for|to|at|towards)\s+(.+?)(?:\.\s*Ref|\s+Ref|\s+on\s+\d|\s+Txn|\s+Avail|\s*[.\-]|$)",
+        re.IGNORECASE,
+    ), "debit"),
+
     # "Rs.500 debited from A/c ...5678 on 12-Sep to AMAZON"
     # "INR 1,200.00 debited from A/c XX1234 on 12-Sep-2024 to SWIGGY"
     (re.compile(
-        _AMOUNT_RE + r"\s+debited\s+from\s+.*?(?:to|at)\s+(.+?)(?:\s+on|\s*[.\-]|$)",
+        _AMOUNT_RE + r"\s+debited\s+(?:from\s+.*?)?(?:to|at|for|towards)\s+(.+?)(?:\s+on\s+\d|\.\s*Ref|\s+Ref|\s*[.\-]|$)",
         re.IGNORECASE,
     ), "debit"),
 
@@ -43,42 +58,63 @@ _PATTERNS: list[tuple[re.Pattern, str]] = [
         re.IGNORECASE,
     ), "debit"),
 
+    # "Paid Rs.200 to merchant@upi" / "paid Rs.500 to ZOMATO"
+    (re.compile(
+        r"(?:paid|sent)\s+" + _AMOUNT_RE + r"\s+(?:to|at|for)\s+(.+?)(?:\s+on\s+\d|\.\s*Ref|\s+Ref|\s*[.\-]|$)",
+        re.IGNORECASE,
+    ), "debit"),
+
+    # UPI: "UPI txn of Rs.200 from A/c X1234 to merchant@upi on ..."
+    (re.compile(
+        r"UPI\s+(?:txn|transaction)\s+(?:of\s+)?" + _AMOUNT_RE +
+        r"\s+from\s+.*?(?:to)\s+(.+?)(?:\s+on\s+\d|\.\s*Ref|\s+Ref|\s*[.\-]|$)",
+        re.IGNORECASE,
+    ), "debit"),
+
+    # Generic debit with "withdrawn" / "spent" / "purchase" / "transaction of"
+    (re.compile(
+        r"(?:withdrawn|spent|purchase|transaction\s+of)\s+" + _AMOUNT_RE +
+        r".*?(?:at|from|for|to)\s+(.+?)(?:\s+on\s+\d|\.\s*Ref|\s+Ref|\s*[.\-]|$)",
+        re.IGNORECASE,
+    ), "debit"),
+
+    (re.compile(
+        _AMOUNT_RE + r"\s+(?:withdrawn|spent|purchase|used\s+at)\b.*?(?:at|from|for|to)\s+(.+?)(?:\s+on\s+\d|\.\s*Ref|\s+Ref|\s*[.\-]|$)",
+        re.IGNORECASE,
+    ), "debit"),
+
+    # --- Credit patterns ---
+
+    # "A/c ... credited with/by INR 780.00 on 20-09-2026 by/from ..."
+    (re.compile(
+        r"(?:A/?c|account|card)\s*[\w*X-]+\s+credited\s+(?:with|by|for)?\s*" + _AMOUNT_RE +
+        r".*?(?:from|by|towards)\s+(.+?)(?:\.\s*Ref|\s+Ref|\s+on\s+\d|\s+Txn|\s+Avail|\s*[.\-]|$)",
+        re.IGNORECASE,
+    ), "credit"),
+
+    (re.compile(
+        r"credited\s+(?:with|by|for)\s+" + _AMOUNT_RE +
+        r".*?(?:from|by|towards)\s+(.+?)(?:\.\s*Ref|\s+Ref|\s+on\s+\d|\s+Txn|\s+Avail|\s*[.\-]|$)",
+        re.IGNORECASE,
+    ), "credit"),
+
     # "INR 1,200.00 credited to your account" / "Rs.500 credited ..."
     (re.compile(
         _AMOUNT_RE + r"\s+credited\s+to\s+(?:your\s+)?(?:A/?c|account)?\s*[.\s]*(\S*)",
         re.IGNORECASE,
     ), "credit"),
 
-    # "Paid Rs.200 to merchant@upi" / "paid Rs.500 to ZOMATO"
-    (re.compile(
-        r"(?:paid|sent)\s+" + _AMOUNT_RE + r"\s+to\s+(.+?)(?:\s+on|\s*[.\-]|$)",
-        re.IGNORECASE,
-    ), "debit"),
-
     # "Received Rs.1000 from RAHUl" / "received INR 500 from ..."
     (re.compile(
-        r"(?:received)\s+" + _AMOUNT_RE + r"\s+from\s+(.+?)(?:\s+on|\s*[.\-]|$)",
+        r"(?:received)\s+" + _AMOUNT_RE + r"\s+(?:from|by)\s+(.+?)(?:\s+on\s+\d|\.\s*Ref|\s+Ref|\s*[.\-]|$)",
         re.IGNORECASE,
     ), "credit"),
-
-    # UPI: "UPI txn of Rs.200 from A/c X1234 to merchant@upi on ..."
-    (re.compile(
-        r"UPI\s+(?:txn|transaction)\s+(?:of\s+)?" + _AMOUNT_RE +
-        r"\s+from\s+.*?(?:to)\s+(.+?)(?:\s+on|\s*[.\-]|$)",
-        re.IGNORECASE,
-    ), "debit"),
-
-    # Generic debit with "withdrawn" / "purchase"
-    (re.compile(
-        _AMOUNT_RE + r"\s+(?:withdrawn|spent|purchase)\b.*?(?:at|from|for)\s+(.+?)(?:\s+on|\s*[.\-]|$)",
-        re.IGNORECASE,
-    ), "debit"),
 ]
 
 # Date patterns commonly found in Indian bank SMSes
 _DATE_PATTERNS: list[str] = [
-    r"(\d{1,2}[-/]\w{3}[-/]?\d{0,4})",   # 12-Sep, 12-Sep-2024, 12/Sep/24
-    r"(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})",   # 12-09-2024, 12/09/24
+    r"(\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b)",   # 20-09-2026, 12-09-2024, 12/09/24
+    r"(\b\d{1,2}[-/][A-Za-z]{3}[-/]?\d{0,4}\b)",   # 12-Sep, 12-Sep-2024, 12/Sep/24
 ]
 
 
@@ -98,6 +134,42 @@ def _extract_date(sms_text: str) -> str | None:
 def _clean_amount(raw: str) -> float:
     """Convert '1,200.50' or '500' to a float, stripping commas."""
     return float(raw.replace(",", ""))
+
+
+def _clean_description(desc: str) -> str:
+    """Clean up extracted merchant string, stripping trailing ref numbers or bank disclaimers."""
+    if not desc:
+        return "Bank transaction"
+    # Strip trailing Ref No, UPI Ref, Txn ID, Avail Bal, on <date>, etc.
+    desc = re.sub(
+        r"(?:\.|\s+)?\b(?:Ref(?:\s*No)?|UPI\s*Ref|Txn(?:\s*ID|\s*No)?|Bal(?:ance)?|Avail(?:\s*Bal)?|Info|UTR|A/?c|on\s+\d{1,2}[-/]|on\s+[A-Za-z]{3})[\s:].*$",
+        "",
+        desc,
+        flags=re.IGNORECASE,
+    )
+    desc = re.sub(r"\s+on\s+\d{1,2}[-/].*$", "", desc, flags=re.IGNORECASE)
+    desc = desc.strip(" .,-:\n\t")
+    return desc if desc else "Bank transaction"
+
+
+def _infer_category(desc: str) -> str:
+    """Classify merchant description into standard FinSage categories."""
+    d = desc.lower()
+    if any(k in d for k in ["mart", "grocery", "groceries", "supermarket", "vegetable", "d-mart", "bigbasket", "blinkit", "zepto", "reliance fresh", "spencer"]):
+        return "Groceries"
+    if any(k in d for k in ["zomato", "swiggy", "cafe", "restaurant", "dining", "pizza", "burger", "starbucks", "mcdonald", "kfc", "domino", "food", "tea", "coffee"]):
+        return "Food & Dining"
+    if any(k in d for k in ["uber", "ola", "metro", "petrol", "fuel", "shell", "hpcl", "bpcl", "flight", "irctc", "train", "travel", "auto", "rapido"]):
+        return "Travel"
+    if any(k in d for k in ["amazon", "flipkart", "myntra", "zara", "h&m", "shopping", "ajio", "nykaa", "croma", "meesho"]):
+        return "Shopping"
+    if any(k in d for k in ["apollo", "pharmacy", "hospital", "clinic", "medicine", "health", "1mg", "netmeds", "pharmeasy"]):
+        return "Healthcare"
+    if any(k in d for k in ["netflix", "hotstar", "spotify", "bookmyshow", "cinema", "pvr", "inox", "entertainment", "movie"]):
+        return "Entertainment"
+    if any(k in d for k in ["electricity", "bescom", "tneb", "water", "gas", "wifi", "airtel", "jio", "broadband", "utility", "bill", "recharge"]):
+        return "Utilities"
+    return "General"
 
 
 def parse_sms(sms_text: str) -> dict | None:
@@ -123,6 +195,10 @@ def parse_sms(sms_text: str) -> dict | None:
     if len(text) < 10:
         return None
 
+    # Also extract account number if present (e.g., A/c XX7314, card ending 1234)
+    acc_m = re.search(r"(?:A/?c|account|card)\s*(?:no\.?\s*)?([*X\d-]+)", text, re.IGNORECASE)
+    account_mask = acc_m.group(1).strip() if acc_m else None
+
     for pattern, txn_type in _PATTERNS:
         m = pattern.search(text)
         if m:
@@ -131,16 +207,20 @@ def parse_sms(sms_text: str) -> dict | None:
             except (ValueError, IndexError):
                 continue
 
-            # Group 2 is the merchant / description (may be empty)
-            description = (m.group(2) or "").strip().rstrip(".")
-            if not description:
-                description = "Bank transaction"
+            # Group 2 is the merchant / description
+            raw_desc = m.group(2) if len(m.groups()) >= 2 and m.group(2) else ""
+            description = _clean_description(raw_desc)
+            category = _infer_category(description)
 
             result: dict[str, Any] = {
                 "amount": round(amount, 2),
                 "description": description,
+                "category": category,
                 "type": txn_type,
             }
+
+            if account_mask:
+                result["account"] = account_mask
 
             # Try to extract a date from the full SMS text
             date_str = _extract_date(text)
@@ -148,6 +228,30 @@ def parse_sms(sms_text: str) -> dict | None:
                 result["date"] = date_str
 
             return result
+
+    # Fallback: check if we can at least find amount and debit/credit keyword
+    amt_m = re.search(_AMOUNT_RE, text, re.IGNORECASE)
+    if amt_m:
+        try:
+            amt = _clean_amount(amt_m.group(1))
+            is_credit = bool(re.search(r"\b(?:credited|received|deposit)\b", text, re.IGNORECASE))
+            desc = "Bank transaction"
+            # Try to extract after 'for', 'to', 'at'
+            for_m = re.search(r"\b(?:for|to|at|towards)\s+([A-Za-z0-9 &.'_-]{3,40})", text, re.IGNORECASE)
+            if for_m:
+                desc = _clean_description(for_m.group(1))
+
+            date_str = _extract_date(text)
+            return {
+                "amount": round(amt, 2),
+                "description": desc,
+                "category": _infer_category(desc),
+                "type": "credit" if is_credit else "debit",
+                "date": date_str,
+                "account": account_mask,
+            }
+        except Exception:
+            pass
 
     # No pattern matched — refuse to guess
     return None

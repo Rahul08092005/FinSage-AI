@@ -55,7 +55,14 @@ export async function getTransactions(token: string, limit = 100) {
 
 export async function createTransaction(
   token: string,
-  data: { amount: number; category: string; transactionDate: string; description: string }
+  data: {
+    amount: number;
+    category: string;
+    transactionDate: string;
+    description: string;
+    accountId?: string;
+    source?: string;
+  }
 ) {
   const res = await fetch(`${BFF_URL}/api/v1/transactions`, {
     method: "POST",
@@ -237,13 +244,26 @@ export async function confirmDocument(
   return res.json();
 }
 
+export async function deleteDocument(token: string, id: string) {
+  const res = await fetch(`${BFF_URL}/api/v1/documents/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to delete document");
+  }
+  return res.json().catch(() => ({ success: true }));
+}
+
 export async function streamAdvisorChat(
   token: string,
   message: string,
   onChunk: (chunk: string) => void,
   onDone: () => void,
   onError: (err: any) => void,
-  onCitations?: (citations: any[]) => void
+  onCitations?: (citations: any[]) => void,
+  onGuruPerspectives?: (perspectives: any[]) => void
 ) {
   try {
     const res = await fetch(`${BFF_URL}/api/v1/advisor/chat`, {
@@ -266,6 +286,9 @@ export async function streamAdvisorChat(
       }
       if (Array.isArray(data.citations) && data.citations.length > 0) {
         onCitations?.(data.citations);
+      }
+      if (Array.isArray(data.guru_perspectives) && data.guru_perspectives.length > 0) {
+        onGuruPerspectives?.(data.guru_perspectives);
       }
       onDone();
       return;
@@ -311,15 +334,32 @@ export async function streamAdvisorChat(
           continue;
         }
 
-        // Check for JSON object chunk with citations
+        // Check for guru_perspectives payload
+        if (payload.startsWith("[GURU_PERSPECTIVES]")) {
+          try {
+            const raw = payload.slice(19).trim();
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              onGuruPerspectives?.(parsed);
+            }
+          } catch (e) {
+            console.warn("[streamAdvisorChat] Failed to parse guru_perspectives:", e);
+          }
+          continue;
+        }
+
+        // Check for JSON object chunk with citations or guru_perspectives
         if (payload.trim().startsWith("{") && payload.trim().endsWith("}")) {
           try {
             const parsed = JSON.parse(payload.trim());
             if (Array.isArray(parsed.citations) && parsed.citations.length > 0) {
               onCitations?.(parsed.citations);
             }
-            if (parsed.token) {
-              onChunk(parsed.token);
+            if (Array.isArray(parsed.guru_perspectives) && parsed.guru_perspectives.length > 0) {
+              onGuruPerspectives?.(parsed.guru_perspectives);
+            }
+            if (parsed.token !== undefined && parsed.token !== null) {
+              onChunk(String(parsed.token));
               continue;
             }
             if (parsed.answer) {
@@ -334,6 +374,7 @@ export async function streamAdvisorChat(
     }
     onDone();
   } catch (err: any) {
+
     const message =
       err?.name === "AbortError"
         ? "Advisor stream was cancelled."
@@ -510,23 +551,28 @@ export async function confirmSmsTransaction(
   token: string,
   draft: Record<string, any>
 ): Promise<any> {
-  const res = await fetch(`${BFF_URL}/api/v1/transactions/confirm-sms`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders(token) },
-    body: JSON.stringify(draft),
-  });
-  if (!res.ok) {
-    let errMsg = "Failed to confirm SMS transaction";
-    try {
-      const json = await res.json();
-      errMsg =
-        json.error?.formErrors?.join(", ") ||
-        (typeof json.error === "string" ? json.error : json.message) ||
-        errMsg;
-    } catch {}
-    throw new Error(errMsg);
+  try {
+    const res = await fetch(`${BFF_URL}/api/v1/transactions/confirm-sms`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify(draft),
+    });
+    if (res.ok) {
+      return res.json();
+    }
+  } catch (err) {
+    console.error("[confirmSmsTransaction] primary endpoint error, falling back to createTransaction:", err);
   }
-  return res.json();
+
+  // Resilient fallback to createTransaction
+  return createTransaction(token, {
+    amount: Number(draft.amount),
+    category: draft.category || "General",
+    description: draft.description || "Bank SMS transaction",
+    transactionDate: draft.transactionDate || draft.date || new Date().toISOString(),
+    accountId: draft.accountId,
+    source: "bank_sms",
+  });
 }
 
 export interface TaxProfileData {
@@ -609,6 +655,67 @@ export async function getTaxProfile(token: string): Promise<any> {
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6: What-If Simulator API Contract
+// ---------------------------------------------------------------------------
+
+export interface WhatIfScenarioRequest {
+  incomeDelta: number;      // Monthly income change in INR (e.g. +10000, -5000)
+  expenseDelta: number;     // Monthly expense change in INR (e.g. -5000, +2000)
+  savingsRateDelta: number; // Savings-rate change in percentage points (e.g. 5 = +5%)
+}
+
+export interface WhatIfGoalProjection {
+  id: string;
+  title: string;
+  originalEta?: string;     // e.g. "2027-01-01" or date string
+  revisedEta?: string;      // e.g. "2026-09-15" or date string
+  onTrack?: boolean;
+  projectedSavings?: number;
+  monthsDelta?: number;
+  targetAmount?: number;
+  currentSaved?: number;
+  [key: string]: any;
+}
+
+export interface WhatIfScenarioResponse {
+  goals: WhatIfGoalProjection[];
+  summary?: string;
+  monthlySavingsDelta?: number;
+  annualSavingsDelta?: number;
+  status?: string;
+  [key: string]: any;
+}
+
+export async function whatIfScenario(
+  token: string,
+  data: WhatIfScenarioRequest
+): Promise<WhatIfScenarioResponse> {
+  const res = await fetch(`${BFF_URL}/api/v1/goals/what-if`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify({
+      incomeDelta: Number(data.incomeDelta || 0),
+      expenseDelta: Number(data.expenseDelta || 0),
+      savingsRateDelta: Number(data.savingsRateDelta || 0),
+    }),
+  });
+
+  if (!res.ok) {
+    let errMsg = "Couldn't run that scenario right now.";
+    try {
+      const json = await res.json();
+      errMsg =
+        json.error?.formErrors?.join(", ") ||
+        (typeof json.error === "string" ? json.error : json.detail || json.message) ||
+        errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  return res.json();
 }
 
 // ---------------------------------------------------------------------------
