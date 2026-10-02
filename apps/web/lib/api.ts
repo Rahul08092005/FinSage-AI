@@ -610,3 +610,101 @@ export async function getTaxProfile(token: string): Promise<any> {
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Pattern Intelligence Feed API (Phase 6)
+// ---------------------------------------------------------------------------
+
+export type InsightType = "pattern" | "subscription" | "leak" | "warning";
+
+export interface InsightItem {
+  id: string;
+  type: InsightType | string;
+  title: string;
+  message?: string;
+  description?: string;
+  category?: string;
+  evidence?: Record<string, any> | Array<any> | string | number;
+  dismissed?: boolean;
+  createdAt?: string;
+  [key: string]: any;
+}
+
+export interface InsightsResponse {
+  insights: InsightItem[];
+  total?: number;
+  status?: string;
+  [key: string]: any;
+}
+
+export async function getInsights(token: string): Promise<InsightItem[]> {
+  const res = await fetch(`${BFF_URL}/api/v1/insights`, {
+    headers: authHeaders(token),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    let errMsg = "Failed to load insights";
+    try {
+      const json = await res.json();
+      errMsg =
+        json.error?.formErrors?.join(", ") ||
+        (typeof json.error === "string" ? json.error : json.message) ||
+        errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  const data = await res.json();
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.insights)) return data.insights;
+  return [];
+}
+
+export async function generateInsights(
+  token: string
+): Promise<{ success: boolean; insights?: InsightItem[]; count?: number }> {
+  const res = await fetch(`${BFF_URL}/api/v1/insights/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+  });
+
+  if (!res.ok) {
+    let errMsg = "Failed to generate insights";
+    try {
+      const json = await res.json();
+      errMsg =
+        json.error?.formErrors?.join(", ") ||
+        (typeof json.error === "string" ? json.error : json.message) ||
+        errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  return res.json().catch(() => ({ success: true }));
+}
+
+export async function dismissInsight(
+  token: string,
+  id: string
+): Promise<{ success: boolean }> {
+  const res = await fetch(`${BFF_URL}/api/v1/insights/${id}/dismiss`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+  });
+
+  if (!res.ok) {
+    let errMsg = "Failed to dismiss insight";
+    try {
+      const json = await res.json();
+      errMsg =
+        json.error?.formErrors?.join(", ") ||
+        (typeof json.error === "string" ? json.error : json.message) ||
+        errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  return res.json().catch(() => ({ success: true }));
+}
+

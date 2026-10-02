@@ -1,16 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AuthGate } from "@/components/AuthGate";
 import { DominantBalanceHero } from "@/components/DominantBalanceHero";
 import { SpendingCharts } from "@/components/SpendingCharts";
-import { getExpenseSummary, getHealthScore, getMe, getSpendingTrend, type TrendItem } from "@/lib/api";
+import { InsightsFeed } from "@/components/InsightsFeed";
+import {
+  getExpenseSummary,
+  getHealthScore,
+  getMe,
+  getSpendingTrend,
+  type TrendItem,
+  type InsightItem,
+} from "@/lib/api";
 
 function AuthenticatedOverviewCards({ token }: { token: string }) {
   const [salary, setSalary] = useState<number | null>(null);
   const [spend, setSpend] = useState<number | null>(null);
   const [categories, setCategories] = useState<Array<{ category: string; total: number; count: number }>>([]);
   const [trend, setTrend] = useState<TrendItem[]>([]);
+  const [insights, setInsights] = useState<InsightItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -53,6 +62,14 @@ function AuthenticatedOverviewCards({ token }: { token: string }) {
   const sortedCategories = [...categories].sort((a, b) => Number(b.total) - Number(a.total));
   const topCategory = sortedCategories[0] || null;
 
+  // Extract categories associated with warning/leak insights
+  const warningCategories = useMemo(() => {
+    return insights
+      .filter((i) => !i.dismissed && (i.type === "warning" || i.type === "leak"))
+      .map((i) => i.category || "")
+      .filter(Boolean);
+  }, [insights]);
+
   return (
     <div className="flex flex-col gap-2.5 sm:gap-3">
       {/* 1. Compact 3-Column Financial Snapshot */}
@@ -66,7 +83,15 @@ function AuthenticatedOverviewCards({ token }: { token: string }) {
       />
 
       {/* 2. Main Analytics: Top 5 Category Breakdown & Spending Rhythm */}
-      <SpendingCharts categoryData={categories} trendData={trend} loading={loading} />
+      <SpendingCharts
+        categoryData={categories}
+        trendData={trend}
+        loading={loading}
+        warningCategories={warningCategories}
+      />
+
+      {/* 3. Pattern Intelligence Feed */}
+      <InsightsFeed token={token} onInsightsLoaded={setInsights} />
     </div>
   );
 }
@@ -78,3 +103,4 @@ export function OverviewCards() {
     </AuthGate>
   );
 }
+

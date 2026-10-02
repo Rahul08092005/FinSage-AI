@@ -28,6 +28,7 @@ interface SpendingChartsProps {
   transactions?: RawTransactionInput[];
   budgets?: CategoryBudgetInput[];
   loading?: boolean;
+  warningCategories?: string[];
 }
 
 const CATEGORY_BAR_COLORS: Record<string, string> = {
@@ -44,8 +45,10 @@ export function SpendingCharts({
   transactions,
   budgets,
   loading = false,
+  warningCategories = [],
 }: SpendingChartsProps) {
   const [hoveredTrendIdx, setHoveredTrendIdx] = useState<number | null>(null);
+
 
   // Compute 1-2 dynamic client-side trend and budget insights
   const insights: TrendInsight[] = useMemo(() => {
@@ -68,6 +71,17 @@ export function SpendingCharts({
   const totalExpense = activeCategories.reduce((acc, cur) => acc + Number(cur.total), 0) || 71816;
   const topCategories = activeCategories.slice(0, 5);
   const maxCategoryAmount = topCategories.length > 0 ? Number(topCategories[0].total) : 40000;
+
+  // Check if any displayed category has an active warning in Insights Feed
+  const matchingWarningCategory = useMemo(() => {
+    if (!warningCategories || warningCategories.length === 0) return null;
+    const lowerWarnings = warningCategories.map((c) => c.toLowerCase().trim());
+    return (
+      topCategories.find((c) => lowerWarnings.includes(c.category.toLowerCase().trim()))
+        ?.category || null
+    );
+  }, [topCategories, warningCategories]);
+
 
   // Trend data setup
   const maxTrendAmount = Math.max(...trendData.map((t) => Number(t.total) || 0), 100000);
@@ -209,7 +223,23 @@ export function SpendingCharts({
             })}
           </div>
         )}
+
+        {/* Warning Category Pointer to Insights Feed */}
+        {matchingWarningCategory && (
+          <div className="mt-3 pt-2 border-t border-[#E5DAC4]/60">
+            <a
+              href="#insights-feed"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200/90 bg-rose-50/90 px-2.5 py-1 text-[11px] font-bold text-rose-900 transition hover:bg-rose-100 active:scale-98"
+            >
+              <span>⚠</span>
+              <span>
+                Your <strong>{matchingWarningCategory}</strong> spending has a heads-up in Insights ↓
+              </span>
+            </a>
+          </div>
+        )}
       </div>
+
 
       {/* 2. RIGHT: YOUR SPENDING RHYTHM (Compact Chart + Small Insight, 42% width) */}
       <div className="lg:col-span-5 rounded-2xl border border-[#DDD9CF] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-sm flex flex-col justify-between">
