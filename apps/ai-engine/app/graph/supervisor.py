@@ -10,6 +10,7 @@ from app.tools.budgeting_tools import get_budget_recommendation
 from app.tools.goal_tools import track_goal_progress
 from app.tools.analytics_tools import get_spending_summary
 from app.tools.tax_advice_tools import get_tax_savings_advice
+from app.tools.nl_query_tools import ask_finsage
 from app.services.llm_client import generate
 
 SPENDING_KEYWORDS = [
@@ -27,6 +28,13 @@ GURU_KEYWORDS = [
 FINANCE_KNOWLEDGE_KEYWORDS = ["what is", "explain", "invest", "itr", "deduction", "mutual fund"]
 BUDGET_KEYWORDS = ["budget", "recommend", "how much should i spend", "limit", "target spend"]
 GOAL_KEYWORDS = ["goal", "saving for", "progress", "target date", "save"]
+NL_FILTER_KEYWORDS = [
+    "weekend", "weekends", "weekday", "weekdays",
+    "saturday", "sunday", "monday", "tuesday", "wednesday", "thursday", "friday",
+    "between", "from", "after", "before", "since", "until",
+    "above", "below", "over", "under", "greater than", "less than", "more than",
+    "filter", "where", "which transaction"
+]
 
 
 class SupervisorAgent(BaseAgent):
@@ -122,6 +130,18 @@ class SupervisorAgent(BaseAgent):
         # Branch 6: Expense summary
         if any(kw in msg_lower for kw in SPENDING_KEYWORDS):
             if state.get("transactions_json"):
+                if any(kw in msg_lower for kw in NL_FILTER_KEYWORDS):
+                    rec = ask_finsage.invoke({"question": message, "transactions_json": state.get("transactions_json")})
+                    state["answer"] = rec.get("answer", "")
+                    state["agent_path"].append("ask_finsage")
+                    state["citations"] = []
+                    state["metrics"] = {
+                        "filters_used": rec.get("filters_used", {}),
+                        "total": rec.get("total", 0.0),
+                        "count": rec.get("count", 0),
+                        "matching_transactions": rec.get("matching_transactions", []),
+                    }
+                    return state
                 agent = ExpenseAgent()
                 return agent.run(state)
 
@@ -134,6 +154,20 @@ class SupervisorAgent(BaseAgent):
         if any(kw in msg_lower for kw in FINANCE_KNOWLEDGE_KEYWORDS) and not state.get("transactions_json"):
             agent = RAGAdvisorAgent()
             return agent.run(state)
+
+        # Branch 9: General analytical / natural language transaction query fallback (Ask FinSage)
+        if state.get("transactions_json"):
+            rec = ask_finsage.invoke({"question": message, "transactions_json": state.get("transactions_json")})
+            state["answer"] = rec.get("answer", "")
+            state["agent_path"].append("ask_finsage")
+            state["citations"] = []
+            state["metrics"] = {
+                "filters_used": rec.get("filters_used", {}),
+                "total": rec.get("total", 0.0),
+                "count": rec.get("count", 0),
+                "matching_transactions": rec.get("matching_transactions", []),
+            }
+            return state
 
 
         # Default fallback: Supervisor direct LLM response grounded in real transactions
