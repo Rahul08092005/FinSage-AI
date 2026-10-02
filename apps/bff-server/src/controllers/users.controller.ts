@@ -12,29 +12,12 @@ const salarySchema = z.object({
   monthlySalary: z.number().positive(),
 });
 
-<<<<<<< HEAD
-// Phase 5: tax profile schema — at least one field required; taxRegime is
-// constrained to 'old' | 'new' at the API layer (DB stores it as plain String).
-const taxProfileSchema = z
-  .object({
-    taxRegime: z.enum(["old", "new"]).optional(),
-    annualIncome: z.number().positive({ message: "annualIncome must be a positive number" }).optional(),
-  })
-  .refine((d) => d.taxRegime !== undefined || d.annualIncome !== undefined, {
-    message: "Provide at least one of taxRegime or annualIncome",
-  });
-
-// ---------------------------------------------------------------------------
-// GET /api/v1/users/me
-// Phase 5: now also returns taxRegime and annualIncome.
-// ---------------------------------------------------------------------------
-=======
 const taxProfileSchema = z.object({
-  annualIncome: z.number().positive(),
+  taxRegime: z.enum(["old", "new"]).optional(),
+  annualIncome: z.number().positive().optional(),
   current80cInvestments: z.number().nonnegative().optional().default(0),
 });
 
->>>>>>> 51cd8e2f482d9209d7d062ff0dd8ec0f4589a414
 export async function getMe(req: AuthedRequest, res: Response) {
   const user = await prisma.user.findUnique({
     where: { id: req.userId },
@@ -87,25 +70,21 @@ export async function updateSalary(req: AuthedRequest, res: Response) {
   });
 }
 
-<<<<<<< HEAD
-// ---------------------------------------------------------------------------
-// PATCH /api/v1/users/me/tax-profile   (Phase 5 — new endpoint)
-// Accepts { taxRegime?: "old"|"new", annualIncome?: number } and persists both.
-// At least one field must be provided; missing fields are left unchanged (PATCH
-// semantics — we use Prisma's undefined-is-skip behaviour).
-// ---------------------------------------------------------------------------
-export async function updateTaxProfile(req: AuthedRequest, res: Response) {
-  const parsed = taxProfileSchema.safeParse(req.body);
-=======
 export async function getTaxProfile(req: AuthedRequest, res: Response) {
   const user = await prisma.user.findUnique({
     where: { id: req.userId },
-    select: { monthlySalary: true },
+    select: { monthlySalary: true, annualIncome: true, taxRegime: true },
   });
 
-  const annualIncome = user?.monthlySalary ? Number(user.monthlySalary) * 12 : 0;
+  const annualIncome = user?.annualIncome
+    ? Number(user.annualIncome)
+    : user?.monthlySalary
+    ? Number(user.monthlySalary) * 12
+    : 0;
+
   res.json({
     annualIncome,
+    taxRegime: user?.taxRegime ?? null,
     current80cInvestments: 0,
   });
 }
@@ -117,25 +96,32 @@ export async function updateTaxProfile(req: AuthedRequest, res: Response) {
     req.body.current_80c_investments ??
     req.body.currentInvestments ??
     0;
+  const taxRegime = req.body.taxRegime;
 
   const parsed = taxProfileSchema.safeParse({
-    annualIncome: Number(income),
-    current80cInvestments: Number(current80c),
+    annualIncome: income ? Number(income) : undefined,
+    current80cInvestments: current80c ? Number(current80c) : 0,
+    taxRegime: taxRegime ? String(taxRegime) : undefined,
   });
 
->>>>>>> 51cd8e2f482d9209d7d062ff0dd8ec0f4589a414
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-<<<<<<< HEAD
+  const { annualIncome, current80cInvestments, taxRegime: regime } = parsed.data;
+
+  const updateData: any = {};
+  if (annualIncome !== undefined) {
+    updateData.annualIncome = annualIncome;
+    updateData.monthlySalary = annualIncome / 12;
+  }
+  if (regime !== undefined) {
+    updateData.taxRegime = regime;
+  }
+
   const updated = await prisma.user.update({
     where: { id: req.userId },
-    data: {
-      // undefined fields are ignored by Prisma — true PATCH behaviour
-      taxRegime: parsed.data.taxRegime,
-      annualIncome: parsed.data.annualIncome,
-    },
+    data: updateData,
     select: {
       id: true,
       name: true,
@@ -146,28 +132,7 @@ export async function updateTaxProfile(req: AuthedRequest, res: Response) {
     },
   });
 
-  // Audit log
-  console.log(
-    `[AUDIT] userId=${req.userId} action=user.updateTaxProfile taxRegime=${updated.taxRegime ?? "unchanged"} timestamp=${new Date().toISOString()}`
-  );
-
-  res.json({
-    id: updated.id,
-    name: updated.name,
-    email: updated.email,
-    monthlySalary: updated.monthlySalary !== null ? Number(updated.monthlySalary) : null,
-    taxRegime: updated.taxRegime ?? null,
-    annualIncome: updated.annualIncome !== null ? Number(updated.annualIncome) : null,
-=======
-  const { annualIncome, current80cInvestments } = parsed.data;
-
-  // 1. Persist updated monthly salary (annual / 12)
-  await prisma.user.update({
-    where: { id: req.userId },
-    data: { monthlySalary: annualIncome / 12 },
-  });
-
-  // 2. Gather user context to generate comprehensive financial plan via AI engine
+  // Gather user context to generate comprehensive financial plan via AI engine
   const now = new Date();
   const threeMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 3, 1));
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -207,7 +172,7 @@ export async function updateTaxProfile(req: AuthedRequest, res: Response) {
         budgets: budgetVariance,
         goals,
         health_score: null,
-        income: annualIncome,
+        income: annualIncome ?? (Number(updated.monthlySalary) * 12),
         current_investments: current80cInvestments,
       }),
     });
@@ -222,9 +187,14 @@ export async function updateTaxProfile(req: AuthedRequest, res: Response) {
 
   res.json({
     success: true,
-    annualIncome,
+    id: updated.id,
+    name: updated.name,
+    email: updated.email,
+    monthlySalary: updated.monthlySalary !== null ? Number(updated.monthlySalary) : null,
+    taxRegime: updated.taxRegime ?? null,
+    annualIncome: updated.annualIncome !== null ? Number(updated.annualIncome) : null,
     current80cInvestments,
     markdown,
->>>>>>> 51cd8e2f482d9209d7d062ff0dd8ec0f4589a414
   });
 }
+

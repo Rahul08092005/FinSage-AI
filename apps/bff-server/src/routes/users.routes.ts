@@ -1,9 +1,5 @@
 import { Router } from "express";
-<<<<<<< HEAD
-import { getMe, updateSalary, updateTaxProfile } from "../controllers/users.controller";
-=======
 import { getMe, updateSalary, getTaxProfile, updateTaxProfile } from "../controllers/users.controller";
->>>>>>> 51cd8e2f482d9209d7d062ff0dd8ec0f4589a414
 import { requireAuth } from "../middleware/auth.middleware";
 
 const router = Router();

@@ -71,10 +71,7 @@ export async function exportReport(req: AuthedRequest, res: Response) {
     // Non-fatal — proceed with null score so the report still generates
   }
 
-<<<<<<< HEAD
-  // --- 4. Phase 5: Build optional financial_plan payload --------------------
-  // Only included when annualIncome is set; completely absent otherwise so the
-  // AI engine template never sees a partial/broken object.
+  // --- 4. Build optional financial_plan and income payload --------------------
   let financialPlan: {
     monthly_salary: number | null;
     annual_income: number;
@@ -82,20 +79,27 @@ export async function exportReport(req: AuthedRequest, res: Response) {
     investment_80c_ytd: number;
   } | undefined;
 
+  let incomeVal: number | undefined;
+  const queryIncome = req.query.income ? Number(req.query.income) : undefined;
+  const query80c = req.query.current80c
+    ? Number(req.query.current80c)
+    : req.query.current_investments
+    ? Number(req.query.current_investments)
+    : undefined;
+
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.userId },
       select: { monthlySalary: true, annualIncome: true, taxRegime: true },
     });
 
+    incomeVal = queryIncome ?? (user?.annualIncome ? Number(user.annualIncome) : user?.monthlySalary ? Number(user.monthlySalary) * 12 : undefined);
+
     if (user?.annualIncome != null) {
-      // Compute 80C-eligible investment total for the current Indian financial year
-      // (1 April → 31 March). Simplification: any transaction categorised as
-      // 'Investment' counts toward 80C. A future iteration would use an explicit
-      // is80CEligible flag or a dedicated table.
-      const fyStart = now.getUTCMonth() >= 3 // April = month index 3
-        ? new Date(Date.UTC(now.getUTCFullYear(), 3, 1))         // this calendar year's Apr 1
-        : new Date(Date.UTC(now.getUTCFullYear() - 1, 3, 1));   // previous calendar year's Apr 1
+      const fyStart =
+        now.getUTCMonth() >= 3
+          ? new Date(Date.UTC(now.getUTCFullYear(), 3, 1))
+          : new Date(Date.UTC(now.getUTCFullYear() - 1, 3, 1));
 
       const investment80cAggregate = await prisma.transaction.aggregate({
         where: {
@@ -114,19 +118,10 @@ export async function exportReport(req: AuthedRequest, res: Response) {
       };
     }
   } catch (err: any) {
-    // Non-fatal — if the user lookup fails, omit the plan section rather than
-    // crash the whole export.
     console.error("[exportReport] Could not fetch user for financial plan:", err.message);
   }
 
   // --- 5. Call Rahul's report-generate endpoint ------------------------------
-=======
-  // --- 4. Call Rahul's report-generate endpoint ------------------------------
-  const queryIncome = req.query.income ? Number(req.query.income) : undefined;
-  const query80c = req.query.current80c ? Number(req.query.current80c) : (req.query.current_investments ? Number(req.query.current_investments) : undefined);
-  const incomeVal = queryIncome ?? (user?.monthlySalary ? Number(user.monthlySalary) * 12 : undefined);
-
->>>>>>> 51cd8e2f482d9209d7d062ff0dd8ec0f4589a414
   let markdown: string;
   try {
     const genRes = await fetch(`${AI_ENGINE_BASE}/internal/reports/generate`, {
@@ -137,16 +132,12 @@ export async function exportReport(req: AuthedRequest, res: Response) {
         budgets: budgetVariance,
         goals,
         health_score: healthScore,
-<<<<<<< HEAD
-        // Phase 5: only included when annualIncome is set; undefined values are
-        // omitted by JSON.stringify so the key is completely absent otherwise.
-        ...(financialPlan !== undefined ? { financial_plan: financialPlan } : {}),
-=======
         income: incomeVal,
-        current_investments: query80c ?? 0,
->>>>>>> 51cd8e2f482d9209d7d062ff0dd8ec0f4589a414
+        current_investments: query80c ?? financialPlan?.investment_80c_ytd ?? 0,
+        ...(financialPlan !== undefined ? { financial_plan: financialPlan } : {}),
       }),
     });
+
 
     if (!genRes.ok) {
       const errText = await genRes.text();

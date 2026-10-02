@@ -114,42 +114,20 @@ export async function deleteTransaction(req: AuthedRequest, res: Response) {
   res.status(204).send();
 }
 
-<<<<<<< HEAD
-// ---------------------------------------------------------------------------
-// POST /api/v1/transactions/parse-sms   (Phase 5 — new)
-// Accepts { sms_text } and forwards to Kavya's AI engine adapter.
-// Returns a DRAFT object — no Transaction row is created yet.
-// The user reviews / edits the draft and then calls confirm-sms.
-// This mirrors the Phase 3 document upload → review → confirm pipeline.
-// ---------------------------------------------------------------------------
-const parseSmsSchema = z.object({
-  sms_text: z
-    .string()
-    .min(1, { message: "sms_text must not be empty" })
-    .max(2000, { message: "sms_text must be 2000 characters or fewer" }),
-});
-
-export async function parseSms(req: AuthedRequest, res: Response) {
-  const parsed = parseSmsSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-
-  let aiBody: { transaction: Record<string, any> | null; confidence: number };
-=======
 const AI_ENGINE_BASE = process.env.AI_ENGINE_URL || "http://localhost:8000";
+const SMS_CONFIDENCE_THRESHOLD = 0.5;
 
 export async function parseSms(req: AuthedRequest, res: Response) {
-  const smsText = req.body.smsText ?? req.body.sms_text;
-  if (!smsText || typeof smsText !== "string" || !smsText.trim()) {
-    return res.status(400).json({ error: "smsText is required" });
+  const smsText = (req.body.smsText ?? req.body.sms_text ?? "").trim();
+  if (!smsText) {
+    return res.status(400).json({ error: "sms_text or smsText is required and must not be empty" });
   }
 
->>>>>>> 51cd8e2f482d9209d7d062ff0dd8ec0f4589a414
   try {
     const aiRes = await fetch(`${AI_ENGINE_BASE}/internal/adapters/bank-upi/parse`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-<<<<<<< HEAD
-      body: JSON.stringify({ sms_text: parsed.data.sms_text }),
+      body: JSON.stringify({ sms_text: smsText }),
     });
 
     if (!aiRes.ok) {
@@ -158,67 +136,19 @@ export async function parseSms(req: AuthedRequest, res: Response) {
       return res.status(502).json({ error: "AI engine failed to parse SMS", detail: errText });
     }
 
-    aiBody = await aiRes.json();
-  } catch (err: any) {
-    console.error("[parseSms] Could not reach AI engine:", err.message);
-    return res.status(503).json({ error: "AI engine unreachable", detail: err.message });
-  }
+    const aiBody = await aiRes.json();
+    const txn = aiBody.transaction;
+    const confidence = aiBody.confidence ?? 0.95;
 
-  const { transaction, confidence } = aiBody;
-
-  // Only surface a draft when confidence meets the threshold AND a transaction
-  // object was actually returned. Below threshold, inform the user so they
-  // can try entering the transaction manually.
-  if (!transaction || confidence < SMS_CONFIDENCE_THRESHOLD) {
-    return res.status(200).json({
-      draft: null,
-      confidence,
-      message:
-        confidence < SMS_CONFIDENCE_THRESHOLD
-          ? `Parse confidence too low (${confidence.toFixed(2)} < ${SMS_CONFIDENCE_THRESHOLD}). Please enter the transaction manually.`
-          : "AI engine could not extract a transaction from this SMS.",
-    });
-  }
-
-  // Tag the draft with the intended source so confirm-sms can trust it.
-  const draft = { ...transaction, source: "upi_sms" };
-
-  return res.status(200).json({ draft, confidence });
-}
-
-// ---------------------------------------------------------------------------
-// POST /api/v1/transactions/confirm-sms   (Phase 5 — new)
-// Accepts the (possibly user-edited) draft and creates the real Transaction row.
-// Source is always locked to 'upi_sms' regardless of what the client sends.
-// ---------------------------------------------------------------------------
-const confirmSmsSchema = z.object({
-  amount: z.number().positive({ message: "Amount must be greater than 0" }),
-  category: z.string().min(1).max(100, { message: "Category must be 100 characters or fewer" }),
-  transactionDate: z.string().refine((s) => !isNaN(Date.parse(s)), {
-    message: "transactionDate must be a valid date string (e.g. ISO 8601)",
-  }),
-  description: z
-    .string()
-    .min(1)
-    .max(500, { message: "Description must be 500 characters or fewer" }),
-  accountId: z.string().optional(),
-});
-
-export async function confirmSms(req: AuthedRequest, res: Response) {
-  const parsed = confirmSmsSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-=======
-      body: JSON.stringify({ sms_text: smsText.trim() }),
-    });
-
-    if (!aiRes.ok) {
-      return res.status(502).json({ error: "AI engine failed to parse SMS" });
-    }
-
-    const aiData = await aiRes.json();
-    const txn = aiData.transaction;
-    if (!txn) {
-      return res.status(422).json({ error: "Couldn't recognize this message format" });
+    if (!txn || confidence < SMS_CONFIDENCE_THRESHOLD) {
+      return res.status(200).json({
+        draft: null,
+        confidence,
+        message:
+          confidence < SMS_CONFIDENCE_THRESHOLD
+            ? `Parse confidence too low (${confidence.toFixed(2)} < ${SMS_CONFIDENCE_THRESHOLD}). Please enter the transaction manually.`
+            : "AI engine could not extract a transaction from this SMS.",
+      });
     }
 
     // Try to link user's account if account masked info exists
@@ -246,62 +176,56 @@ export async function confirmSms(req: AuthedRequest, res: Response) {
 
     const draft = {
       amount: txn.amount,
-      description: txn.description,
+      description: txn.description || "SMS Transaction",
       category: txn.category || "General",
       transactionDate: txn.date || new Date().toISOString().slice(0, 10),
       type: txn.type || "debit",
-      source: "bank_sms",
+      source: "upi_sms",
       accountId: matchedAccountId,
       accountName: matchedAccountName,
-      confidence: aiData.confidence ?? 0.95,
+      confidence,
     };
 
-    return res.json({ draft, transaction: draft, confidence: draft.confidence });
+    return res.status(200).json({ draft, transaction: draft, confidence });
   } catch (err: any) {
-    console.error("[parseSms] error:", err.message);
-    return res.status(500).json({ error: "Internal error parsing SMS" });
+    console.error("[parseSms] Could not reach AI engine:", err.message);
+    return res.status(503).json({ error: "AI engine unreachable", detail: err.message });
   }
 }
 
+const confirmSmsSchema = z.object({
+  amount: z.union([z.number(), z.string()]).transform((val) => Number(val)),
+  category: z.string().optional().default("General"),
+  transactionDate: z
+    .string()
+    .optional()
+    .default(() => new Date().toISOString()),
+  description: z.string().min(1, { message: "Description is required" }),
+  accountId: z.string().optional(),
+});
+
 export async function confirmSms(req: AuthedRequest, res: Response) {
-  const { amount, description, category, transactionDate, accountId } = req.body;
-  if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
-    return res.status(400).json({ error: "Valid amount is required" });
+  const parsed = confirmSmsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
   }
-  if (!description || typeof description !== "string") {
-    return res.status(400).json({ error: "Description is required" });
-  }
->>>>>>> 51cd8e2f482d9209d7d062ff0dd8ec0f4589a414
 
   const tx = await prisma.transaction.create({
     data: {
       userId: req.userId as string,
-<<<<<<< HEAD
       amount: parsed.data.amount,
       category: parsed.data.category,
       transactionDate: new Date(parsed.data.transactionDate),
       description: parsed.data.description,
-      accountId: parsed.data.accountId,
-      source: "upi_sms", // always locked — not taken from client input
+      accountId: parsed.data.accountId || undefined,
+      source: "upi_sms",
     },
   });
 
-  // Audit log: SMS-derived transaction confirmed and committed
   console.log(
     `[AUDIT] userId=${req.userId} action=transaction.confirm_sms transactionId=${tx.id} timestamp=${new Date().toISOString()}`
   );
 
   res.status(201).json(tx);
-=======
-      amount: Number(amount),
-      category: category || "General",
-      description: description.trim(),
-      transactionDate: transactionDate ? new Date(transactionDate) : new Date(),
-      accountId: accountId || undefined,
-      source: "bank_sms",
-    },
-  });
-
-  return res.status(201).json(tx);
->>>>>>> 51cd8e2f482d9209d7d062ff0dd8ec0f4589a414
 }
+
