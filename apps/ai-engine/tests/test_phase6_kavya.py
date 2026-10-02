@@ -21,6 +21,8 @@ from app.analytics.spending import (
     calculate_goal_projection,
     simulate_scenario,
 )
+from app.analytics.experiments import evaluate_experiment
+
 
 
 # ===========================================================================
@@ -1103,6 +1105,66 @@ class TestRunPatternDetectionStep43:
         assert len(warnings) >= 1
         subtypes = {w["subtype"] for w in warnings}
         assert "savings_decline" in subtypes or "goal_delay_risk" in subtypes
+
+
+class TestEvaluateExperiment:
+    """Verification for evaluate_experiment() statistics and confidence scoring."""
+
+    def test_clear_reduction_high_confidence(self):
+        """14-day intervention with 40% reduction -> high confidence."""
+        baseline_df = pd.DataFrame([
+            {"category": "Dining Out", "amount": 100.0},
+            {"category": "Dining Out", "amount": 200.0},
+            {"category": "Dining Out", "amount": 1200.0},
+        ])  # total 1500 over 30 days = 50.0/day
+        intervention_df = pd.DataFrame([
+            {"category": "Dining Out", "amount": 120.0},
+            {"category": "Dining Out", "amount": 300.0},
+        ])  # total 420 over 14 days = 30.0/day
+
+        res = evaluate_experiment("Dining Out", baseline_df, intervention_df, 30, 14)
+
+        assert res["category"] == "Dining Out"
+        assert res["baseline_daily_avg"] == 50.0
+        assert res["intervention_daily_avg"] == 30.0
+        assert res["absolute_difference"] == -20.0
+        assert res["percent_difference"] == -40.0
+        assert res["confidence"] == "high"
+        assert res["projected_annual_impact"] == -7300.0
+
+    def test_near_identical_periods_low_confidence(self):
+        """14-day intervention with near-identical spending -> low confidence, near-zero impact."""
+        baseline_df = pd.DataFrame([{"category": "Groceries", "amount": 700.0}])  # 50.0/day over 14 days
+        intervention_df = pd.DataFrame([{"category": "Groceries", "amount": 707.0}])  # 50.5/day over 14 days
+
+        res = evaluate_experiment("Groceries", baseline_df, intervention_df, 14, 14)
+
+        assert res["baseline_daily_avg"] == 50.0
+        assert res["intervention_daily_avg"] == 50.5
+        assert res["absolute_difference"] == 0.5
+        assert res["percent_difference"] == 1.0
+        assert res["confidence"] == "low"
+        assert res["projected_annual_impact"] == 182.5
+
+    def test_short_duration_low_confidence(self):
+        """Intervention under 7 days -> low confidence despite large change."""
+        baseline_df = pd.DataFrame([{"category": "Shopping", "amount": 1000.0}])  # 100.0/day over 10 days
+        intervention_df = pd.DataFrame([{"category": "Shopping", "amount": 250.0}])  # 50.0/day over 5 days
+
+        res = evaluate_experiment("Shopping", baseline_df, intervention_df, 10, 5)
+
+        assert res["confidence"] == "low"
+        assert res["percent_difference"] == -50.0
+
+    def test_medium_confidence_cases(self):
+        """Intervention between 7 and 13 days with >20% change -> medium confidence."""
+        baseline_df = pd.DataFrame([{"category": "Entertainment", "amount": 1000.0}])  # 100.0/day over 10 days
+        intervention_df = pd.DataFrame([{"category": "Entertainment", "amount": 500.0}])  # 50.0/day over 10 days
+
+        res = evaluate_experiment("Entertainment", baseline_df, intervention_df, 10, 10)
+
+        assert res["confidence"] == "medium"
+
 
 
 
