@@ -21,6 +21,8 @@ from app.analytics.spending import (
     calculate_goal_projection,
     simulate_scenario,
 )
+from app.analytics.experiments import evaluate_experiment
+
 
 
 # ===========================================================================
@@ -597,3 +599,572 @@ class TestSimulateScenarioEndpointCompat:
         assert "annual_savings_delta" in result
         assert "category_projections" in result
         assert "summary" in result
+
+
+# ===========================================================================
+# Pattern Intelligence Engine Tests (Kavya — Step 5.1)
+# ===========================================================================
+
+
+from app.analytics.pattern_engine import (
+    detect_time_of_month_patterns,
+    detect_salary_triggered_spending,
+    detect_category_trend,
+    detect_recurring_subscriptions,
+    detect_money_leaks,
+    detect_savings_decline,
+    detect_discretionary_outpacing_income,
+    detect_goal_delay_risk,
+    run_pattern_detection,
+)
+
+
+class TestPatternEngineTimeOfMonth:
+    """Verification for detect_time_of_month_patterns()."""
+
+    def test_catches_end_of_month_food_spike(self):
+        """Synthetic test DataFrame with obvious end-of-month food spike."""
+        rows = [
+            # Early (days 1-10): low food spend (100 total over 10 days = 10/day)
+            {"date": "2026-01-03", "amount": 50.0, "category": "Food"},
+            {"date": "2026-01-08", "amount": 50.0, "category": "Food"},
+            # Mid (days 11-20): moderate food spend (200 total over 10 days = 20/day)
+            {"date": "2026-01-13", "amount": 100.0, "category": "Food"},
+            {"date": "2026-01-18", "amount": 100.0, "category": "Food"},
+            # Late (days 21-31): heavy spike (2200 total over 11 days = 200/day)
+            {"date": "2026-01-22", "amount": 600.0, "category": "Food"},
+            {"date": "2026-01-25", "amount": 800.0, "category": "Food"},
+            {"date": "2026-01-29", "amount": 800.0, "category": "Food"},
+        ]
+        df = pd.DataFrame(rows)
+        patterns = detect_time_of_month_patterns(df)
+
+        assert len(patterns) == 1
+        pat = patterns[0]
+        assert pat["type"] == "pattern"
+        assert pat["category"] == "Food"
+        assert "late" in pat["title"].lower()
+        assert pat["evidence"]["peak_bucket"] == "late"
+        assert pat["evidence"]["peak_daily_avg"] == 200.0
+        assert pat["evidence"]["second_highest_avg"] == 20.0
+        assert pat["evidence"]["percentage_above_next"] > 30.0
+
+    def test_balanced_spending_produces_no_pattern(self):
+        """Evenly distributed spend across buckets does not trigger pattern."""
+        rows = [
+            {"date": "2026-01-05", "amount": 100.0, "category": "Rent"},
+            {"date": "2026-01-15", "amount": 100.0, "category": "Rent"},
+            {"date": "2026-01-25", "amount": 110.0, "category": "Rent"},
+        ]
+        df = pd.DataFrame(rows)
+        patterns = detect_time_of_month_patterns(df)
+        assert patterns == []
+
+    def test_empty_or_insufficient_data_returns_empty_list(self):
+        """Empty DataFrame or None returns empty list without error."""
+        assert detect_time_of_month_patterns(pd.DataFrame()) == []
+        assert detect_time_of_month_patterns(None) == []
+
+
+class TestPatternEngineSalaryTriggered:
+    """Verification for detect_salary_triggered_spending()."""
+
+    def test_catches_post_salary_discretionary_spike(self):
+        """Discretionary spend elevated in the 5 days following salary date."""
+        rows = [
+            # Salary arrives on day 1
+            {"date": "2026-01-01", "amount": 80000.0, "category": "Salary"},
+            # Days 2-6 (post-salary): heavy shopping/dining (5000 over 5 days = 1000/day)
+            {"date": "2026-01-02", "amount": 1200.0, "category": "Shopping"},
+            {"date": "2026-01-03", "amount": 1500.0, "category": "Food"},
+            {"date": "2026-01-04", "amount": 800.0, "category": "Entertainment"},
+            {"date": "2026-01-05", "amount": 1500.0, "category": "Shopping"},
+            # Rest of month: minimal discretionary spend (500 over 26 days ≈ 19.2/day)
+            {"date": "2026-01-15", "amount": 250.0, "category": "Food"},
+            {"date": "2026-01-22", "amount": 250.0, "category": "Shopping"},
+        ]
+        df = pd.DataFrame(rows)
+        pat = detect_salary_triggered_spending(df, salary_date_guess=1)
+
+        assert pat is not None
+        assert pat["type"] == "pattern"
+        assert pat["category"] == "Discretionary"
+        assert pat["evidence"]["salary_day"] == 1
+        assert pat["evidence"]["post_salary_daily_avg"] > pat["evidence"]["rest_of_month_daily_avg"]
+        assert pat["evidence"]["percentage_increase"] > 30.0
+
+    def test_detects_salary_day_automatically_when_not_provided(self):
+        """Finds recurring salary day from transaction category."""
+        rows = [
+            {"date": "2026-01-25", "amount": 75000.0, "category": "Salary"},
+            {"date": "2026-01-26", "amount": 2000.0, "category": "Shopping"},
+            {"date": "2026-01-27", "amount": 2000.0, "category": "Food"},
+        ]
+        df = pd.DataFrame(rows)
+        pat = detect_salary_triggered_spending(df, salary_date_guess=None)
+        assert pat is not None
+        assert pat["evidence"]["salary_day"] == 25
+
+    def test_empty_or_insufficient_returns_none(self):
+        """Returns None (not error) when given too little data."""
+        assert detect_salary_triggered_spending(pd.DataFrame(), salary_date_guess=1) is None
+        assert detect_salary_triggered_spending(None, salary_date_guess=1) is None
+        assert detect_salary_triggered_spending(pd.DataFrame([{"date": "2026-01-05", "amount": 100}]), salary_date_guess=None) is None
+
+
+class TestPatternEngineCategoryTrend:
+    """Verification for detect_category_trend()."""
+
+    def test_catches_upward_transport_trend(self):
+        """Synthetic upward transport trend across 4 months is caught."""
+        rows = [
+            {"date": "2026-01-15", "amount": 1000.0, "category": "Transport"},
+            {"date": "2026-02-15", "amount": 1300.0, "category": "Transport"},
+            {"date": "2026-03-15", "amount": 1600.0, "category": "Transport"},
+            {"date": "2026-04-15", "amount": 1900.0, "category": "Transport"},
+        ]
+        df = pd.DataFrame(rows)
+        pat = detect_category_trend(df, category="Transport", months=4)
+
+        assert pat is not None
+        assert pat["type"] == "pattern"
+        assert pat["category"] == "Transport"
+        assert "upward" in pat["title"].lower()
+        assert pat["evidence"]["slope"] == pytest.approx(300.0, rel=1e-2)
+        assert pat["evidence"]["months_analyzed"] == 4
+        assert pat["evidence"]["r_squared"] > 0.95
+
+    def test_flat_or_downward_trend_returns_none(self):
+        """Flat spending does not trigger upward trend pattern."""
+        rows = [
+            {"date": "2026-01-15", "amount": 5000.0, "category": "Rent"},
+            {"date": "2026-02-15", "amount": 5000.0, "category": "Rent"},
+            {"date": "2026-03-15", "amount": 5000.0, "category": "Rent"},
+            {"date": "2026-04-15", "amount": 5000.0, "category": "Rent"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_category_trend(df, category="Rent", months=4) is None
+
+    def test_insufficient_history_returns_none(self):
+        """Fewer than 3 months of history returns None."""
+        rows = [
+            {"date": "2026-01-15", "amount": 1000.0, "category": "Transport"},
+            {"date": "2026-02-15", "amount": 1500.0, "category": "Transport"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_category_trend(df, category="Transport", months=4) is None
+        assert detect_category_trend(pd.DataFrame(), category="Transport") is None
+        assert detect_category_trend(None, category="Transport") is None
+
+
+# ===========================================================================
+# Step 4.2 Unit Tests: Subscriptions & Money Leaks
+# ===========================================================================
+
+
+class TestDetectRecurringSubscriptions:
+    """Verification for detect_recurring_subscriptions()."""
+
+    def test_identifies_3_months_netflix_charge(self):
+        """3 months of identical Rs.649 charge is detected as a subscription."""
+        rows = [
+            {"date": "2026-01-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            {"date": "2026-02-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            {"date": "2026-03-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+        ]
+        df = pd.DataFrame(rows)
+        subscriptions = detect_recurring_subscriptions(df)
+
+        assert len(subscriptions) == 1
+        sub = subscriptions[0]
+        assert sub["type"] == "subscription"
+        assert sub["merchant"].lower() == "netflix"
+        assert sub["amount"] == 649.0
+        assert sub["occurrences"] == 3
+        assert sub["estimated_annual_cost"] == pytest.approx(7788.0, abs=0.01)
+        assert "evidence" in sub
+        assert "transactions" in sub
+        assert len(sub["transactions"]) == 3
+
+    def test_tolerance_within_plus_minus_5_days(self):
+        """Cadence intervals within 25 to 35 days qualify for monthly subscription."""
+        rows = [
+            {"date": "2026-01-01", "amount": 199.0, "description": "Spotify Premium"},
+            {"date": "2026-01-28", "amount": 199.0, "description": "Spotify Premium"},  # 27 days
+            {"date": "2026-03-03", "amount": 199.0, "description": "Spotify Premium"},  # 34 days
+        ]
+        df = pd.DataFrame(rows)
+        subscriptions = detect_recurring_subscriptions(df)
+        assert len(subscriptions) == 1
+        assert subscriptions[0]["occurrences"] == 3
+        assert subscriptions[0]["estimated_annual_cost"] == pytest.approx(199.0 * 12, abs=0.01)
+
+    def test_irregular_cadence_not_detected(self):
+        """Transactions on random or daily dates are not flagged as subscriptions."""
+        rows = [
+            {"date": "2026-01-01", "amount": 100.0, "description": "Tea Stall"},
+            {"date": "2026-01-02", "amount": 100.0, "description": "Tea Stall"},
+            {"date": "2026-01-03", "amount": 100.0, "description": "Tea Stall"},
+        ]
+        df = pd.DataFrame(rows)
+        subscriptions = detect_recurring_subscriptions(df)
+        assert subscriptions == []
+
+    def test_under_3_occurrences_not_detected(self):
+        """Only 2 occurrences is below the 3+ requirement."""
+        rows = [
+            {"date": "2026-01-15", "amount": 499.0, "description": "Hotstar"},
+            {"date": "2026-02-15", "amount": 499.0, "description": "Hotstar"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_recurring_subscriptions(df) == []
+
+    def test_one_off_large_purchase_never_subscription(self):
+        """A single large purchase is never flagged as a subscription."""
+        rows = [
+            {"date": "2026-01-10", "amount": 55000.0, "description": "Apple Store Mumbai", "category": "Electronics"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_recurring_subscriptions(df) == []
+
+    def test_upi_and_pos_prefix_normalization(self):
+        """Strips UPI/POS noise and correctly groups same merchant."""
+        rows = [
+            {"date": "2026-01-10", "amount": 299.0, "description": "UPI-Amazon Prime/12345"},
+            {"date": "2026-02-10", "amount": 299.0, "description": "UPI/Amazon Prime/67890"},
+            {"date": "2026-03-10", "amount": 299.0, "description": "Amazon Prime"},
+        ]
+        df = pd.DataFrame(rows)
+        subs = detect_recurring_subscriptions(df)
+        assert len(subs) == 1
+        assert "amazon prime" in subs[0]["merchant"].lower()
+        assert subs[0]["occurrences"] == 3
+
+
+class TestDetectMoneyLeaks:
+    """Verification for detect_money_leaks()."""
+
+    def test_detects_small_food_transactions_leak(self):
+        """Many small Food transactions exceeding 15% share is reported as a leak."""
+        rows = [
+            # 10 small Food transactions under ₹200 (₹150 * 10 = ₹1,500 total)
+            {"date": f"2026-01-{i+1:02d}", "amount": 150.0, "category": "Food"}
+            for i in range(10)
+        ]
+        df = pd.DataFrame(rows)
+        leaks = detect_money_leaks(df, threshold=200.0)
+
+        assert len(leaks) == 1
+        leak = leaks[0]
+        assert leak["type"] == "leak"
+        assert leak["category"] == "Food"
+        assert leak["count"] == 10
+        assert leak["total"] == 1500.0
+        # 1 month: 1500 * 12 = 18000 annual spend -> 30% reduction = 5400
+        assert leak["projected_annual_savings_at_30pct_reduction"] == pytest.approx(5400.0, abs=1.0)
+        assert "evidence" in leak
+        assert "transactions" in leak
+        assert len(leak["transactions"]) == 10
+
+    def test_small_transactions_under_15pct_share_ignored(self):
+        """Small transactions that form < 15% of category spend are not flagged."""
+        rows = [
+            # 1 massive grocery run of ₹10,000 + 3 ₹50 snacks = ₹10,150 total
+            {"date": "2026-01-05", "amount": 10000.0, "category": "Groceries"},
+            {"date": "2026-01-10", "amount": 50.0, "category": "Groceries"},
+            {"date": "2026-01-15", "amount": 50.0, "category": "Groceries"},
+            {"date": "2026-01-20", "amount": 50.0, "category": "Groceries"},
+        ]
+        df = pd.DataFrame(rows)
+        # Small share = 150 / 10150 ≈ 1.48% (< 15%)
+        leaks = detect_money_leaks(df, threshold=200.0)
+        assert leaks == []
+
+    def test_one_off_large_purchase_never_leak(self):
+        """A single large purchase is never misclassified as a money leak."""
+        rows = [
+            {"date": "2026-01-10", "amount": 75000.0, "category": "Jewellery"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_money_leaks(df) == []
+
+    def test_empty_or_none_returns_empty_list(self):
+        """Empty or None input returns empty list."""
+        assert detect_money_leaks(pd.DataFrame()) == []
+        assert detect_money_leaks(None) == []
+
+
+class TestRunPatternDetection:
+    """Verification for run_pattern_detection() orchestration across all 5 insight types."""
+
+    def test_runs_all_5_detectors_and_combines_output(self):
+        """Combines time-of-month, salary-triggered, category trend, subscription, and leak."""
+        rows = [
+            # 1. Salary on day 1
+            {"date": "2026-01-01", "amount": 80000.0, "category": "Salary"},
+            # 2. Post-salary discretionary surge (Shopping days 2-6)
+            {"date": "2026-01-02", "amount": 2500.0, "category": "Shopping"},
+            {"date": "2026-01-03", "amount": 2500.0, "category": "Shopping"},
+            # 3. Upward Transport trend across 4 months
+            {"date": "2026-01-10", "amount": 1000.0, "category": "Transport"},
+            {"date": "2026-02-10", "amount": 1300.0, "category": "Transport"},
+            {"date": "2026-03-10", "amount": 1600.0, "category": "Transport"},
+            {"date": "2026-04-10", "amount": 1900.0, "category": "Transport"},
+            # 4. Recurring subscription (Netflix Rs.649 across 3 months)
+            {"date": "2026-01-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            {"date": "2026-02-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            {"date": "2026-03-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            # 5. Money leaks: small Food transactions (<= 200, 100% share of Food)
+            {"date": "2026-01-22", "amount": 120.0, "category": "Food"},
+            {"date": "2026-01-23", "amount": 150.0, "category": "Food"},
+            {"date": "2026-01-24", "amount": 180.0, "category": "Food"},
+            {"date": "2026-01-25", "amount": 110.0, "category": "Food"},
+        ]
+        df = pd.DataFrame(rows)
+        results = run_pattern_detection(df, salary_day=1)
+
+        assert isinstance(results, list)
+        types_found = {r["type"] for r in results}
+        assert "pattern" in types_found
+        assert "subscription" in types_found
+        assert "leak" in types_found
+
+        # Verify subscription was detected
+        subs = [r for r in results if r["type"] == "subscription"]
+        assert len(subs) == 1
+        assert subs[0]["merchant"].lower() == "netflix"
+        assert subs[0]["amount"] == 649.0
+        assert subs[0]["estimated_annual_cost"] == 7788.0
+
+        # Verify leak was detected
+        leaks = [r for r in results if r["type"] == "leak"]
+        assert len(leaks) == 1
+        assert leaks[0]["category"] == "Food"
+        assert leaks[0]["count"] == 4
+        assert leaks[0]["total"] == 560.0
+
+    def test_empty_or_none_returns_empty_list(self):
+        """Returns empty list for empty DataFrame or None."""
+        assert run_pattern_detection(pd.DataFrame()) == []
+        assert run_pattern_detection(None) == []
+        assert run_pattern_detection([]) == []
+
+
+# ===========================================================================
+# Step 4.3 Unit Tests: Risk Warnings
+# ===========================================================================
+
+
+class TestDetectSavingsDecline:
+    """Verification for detect_savings_decline()."""
+
+    def test_declining_net_savings_3_months_fires_warning(self):
+        """3 months of declining net savings (spend 30k -> 40k -> 50k, salary 80k)."""
+        rows = [
+            {"date": "2026-01-15", "amount": 30000.0, "category": "General"},
+            {"date": "2026-02-15", "amount": 40000.0, "category": "General"},
+            {"date": "2026-03-15", "amount": 50000.0, "category": "General"},
+        ]
+        df = pd.DataFrame(rows)
+        warn = detect_savings_decline(df, monthly_salary=80000.0)
+
+        assert warn is not None
+        assert warn["type"] == "warning"
+        assert warn["subtype"] == "savings_decline"
+        assert warn["months_of_data"] == 3
+        assert "consistently declined" in warn["message"]
+        assert warn["evidence"]["initial_savings"] == 50000.0
+        assert warn["evidence"]["latest_savings"] == 30000.0
+
+    def test_healthy_flat_spending_no_warning(self):
+        """Flat spend month-over-month produces constant savings -> no false positive warning."""
+        rows = [
+            {"date": "2026-01-15", "amount": 30000.0, "category": "General"},
+            {"date": "2026-02-15", "amount": 30000.0, "category": "General"},
+            {"date": "2026-03-15", "amount": 30000.0, "category": "General"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_savings_decline(df, monthly_salary=80000.0) is None
+
+    def test_healthy_increasing_savings_no_warning(self):
+        """Increasing net savings -> no warning."""
+        rows = [
+            {"date": "2026-01-15", "amount": 40000.0, "category": "General"},
+            {"date": "2026-02-15", "amount": 35000.0, "category": "General"},
+            {"date": "2026-03-15", "amount": 30000.0, "category": "General"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_savings_decline(df, monthly_salary=80000.0) is None
+
+    def test_no_salary_or_under_3_months_returns_none(self):
+        """No salary or <3 months returns None."""
+        rows = [
+            {"date": "2026-01-15", "amount": 30000.0, "category": "General"},
+            {"date": "2026-02-15", "amount": 40000.0, "category": "General"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_savings_decline(df, monthly_salary=None) is None
+        assert detect_savings_decline(df, monthly_salary=80000.0) is None
+
+
+class TestDetectDiscretionaryOutpacingIncome:
+    """Verification for detect_discretionary_outpacing_income()."""
+
+    def test_discretionary_outpacing_flat_income_fires_warning(self):
+        """Discretionary categories growing while salary is flat."""
+        rows = [
+            {"date": "2026-01-15", "amount": 10000.0, "category": "Food"},
+            {"date": "2026-02-15", "amount": 15000.0, "category": "Shopping"},
+            {"date": "2026-03-15", "amount": 20000.0, "category": "Entertainment"},
+        ]
+        df = pd.DataFrame(rows)
+        warn = detect_discretionary_outpacing_income(df, monthly_salary=80000.0)
+
+        assert warn is not None
+        assert warn["type"] == "warning"
+        assert warn["subtype"] == "discretionary_outpacing_income"
+        assert warn["months_of_data"] == 3
+        assert "outpacing income" in warn["message"]
+
+    def test_healthy_discretionary_spend_no_warning(self):
+        """Flat discretionary spending produces no warning."""
+        rows = [
+            {"date": "2026-01-15", "amount": 10000.0, "category": "Food"},
+            {"date": "2026-02-15", "amount": 10000.0, "category": "Shopping"},
+            {"date": "2026-03-15", "amount": 10000.0, "category": "Entertainment"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_discretionary_outpacing_income(df, monthly_salary=80000.0) is None
+
+    def test_income_growing_faster_than_discretionary_no_warning(self):
+        """Income growing faster than discretionary spend -> no warning."""
+        rows = [
+            # Discretionary spend: 10k -> 11k -> 12k (+10% slope)
+            {"date": "2026-01-15", "amount": 10000.0, "category": "Food"},
+            {"date": "2026-02-15", "amount": 11000.0, "category": "Food"},
+            {"date": "2026-03-15", "amount": 12000.0, "category": "Food"},
+            # Salary credit: 50k -> 75k -> 100k (+45% slope)
+            {"date": "2026-01-01", "amount": 50000.0, "category": "Salary"},
+            {"date": "2026-02-01", "amount": 75000.0, "category": "Salary"},
+            {"date": "2026-03-01", "amount": 100000.0, "category": "Salary"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_discretionary_outpacing_income(df, monthly_salary=None) is None
+
+
+class TestDetectGoalDelayRisk:
+    """Verification for detect_goal_delay_risk()."""
+
+    def test_off_track_goal_fires_warning(self):
+        """Projection with on_track=False produces a warning dict."""
+        goal = {"title": "Buy Laptop", "target_amount": 100000, "target_date": "2026-05-01"}
+        proj = {"on_track": False, "projected_date": "2027-01-15", "months_remaining": 9}
+        warn = detect_goal_delay_risk(goal, proj)
+
+        assert warn is not None
+        assert warn["type"] == "warning"
+        assert warn["subtype"] == "goal_delay_risk"
+        assert warn["goal_title"] == "Buy Laptop"
+        assert "risk of delay" in warn["message"]
+
+    def test_on_track_goal_returns_none(self):
+        """Projection with on_track=True returns None."""
+        goal = {"title": "Emergency Fund", "target_amount": 50000, "target_date": "2028-01-01"}
+        proj = {"on_track": True, "projected_date": "2026-12-01", "months_remaining": 2}
+        assert detect_goal_delay_risk(goal, proj) is None
+
+
+class TestRunPatternDetectionStep43:
+    """Verification for run_pattern_detection() optional parameters and risk warnings."""
+
+    def test_unaffected_callers_without_salary_or_goals(self):
+        """Callers from 4.1-4.2 passing only transactions work without error."""
+        rows = [
+            {"date": "2026-01-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            {"date": "2026-02-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+            {"date": "2026-03-15", "amount": 649.0, "description": "Netflix", "category": "Entertainment"},
+        ]
+        df = pd.DataFrame(rows)
+        results = run_pattern_detection(df)
+        assert isinstance(results, list)
+        assert any(r["type"] == "subscription" for r in results)
+
+    def test_includes_risk_warnings_when_salary_and_goals_provided(self):
+        """Passing salary and off-track goals appends warning-type insights."""
+        rows = [
+            # 3 months of rising spending -> declining net savings
+            {"date": "2026-01-15", "amount": 30000.0, "category": "Shopping"},
+            {"date": "2026-02-15", "amount": 40000.0, "category": "Shopping"},
+            {"date": "2026-03-15", "amount": 50000.0, "category": "Shopping"},
+        ]
+        df = pd.DataFrame(rows)
+        goal = {"title": "House Downpayment", "target_amount": 5000000, "current_saved": 0, "target_date": "2026-06-01"}
+        results = run_pattern_detection(df, salary_day=1, monthly_salary=60000.0, goals=[goal])
+
+        warnings = [r for r in results if r["type"] == "warning"]
+        assert len(warnings) >= 1
+        subtypes = {w["subtype"] for w in warnings}
+        assert "savings_decline" in subtypes or "goal_delay_risk" in subtypes
+
+
+class TestEvaluateExperiment:
+    """Verification for evaluate_experiment() statistics and confidence scoring."""
+
+    def test_clear_reduction_high_confidence(self):
+        """14-day intervention with 40% reduction -> high confidence."""
+        baseline_df = pd.DataFrame([
+            {"category": "Dining Out", "amount": 100.0},
+            {"category": "Dining Out", "amount": 200.0},
+            {"category": "Dining Out", "amount": 1200.0},
+        ])  # total 1500 over 30 days = 50.0/day
+        intervention_df = pd.DataFrame([
+            {"category": "Dining Out", "amount": 120.0},
+            {"category": "Dining Out", "amount": 300.0},
+        ])  # total 420 over 14 days = 30.0/day
+
+        res = evaluate_experiment("Dining Out", baseline_df, intervention_df, 30, 14)
+
+        assert res["category"] == "Dining Out"
+        assert res["baseline_daily_avg"] == 50.0
+        assert res["intervention_daily_avg"] == 30.0
+        assert res["absolute_difference"] == -20.0
+        assert res["percent_difference"] == -40.0
+        assert res["confidence"] == "high"
+        assert res["projected_annual_impact"] == -7300.0
+
+    def test_near_identical_periods_low_confidence(self):
+        """14-day intervention with near-identical spending -> low confidence, near-zero impact."""
+        baseline_df = pd.DataFrame([{"category": "Groceries", "amount": 700.0}])  # 50.0/day over 14 days
+        intervention_df = pd.DataFrame([{"category": "Groceries", "amount": 707.0}])  # 50.5/day over 14 days
+
+        res = evaluate_experiment("Groceries", baseline_df, intervention_df, 14, 14)
+
+        assert res["baseline_daily_avg"] == 50.0
+        assert res["intervention_daily_avg"] == 50.5
+        assert res["absolute_difference"] == 0.5
+        assert res["percent_difference"] == 1.0
+        assert res["confidence"] == "low"
+        assert res["projected_annual_impact"] == 182.5
+
+    def test_short_duration_low_confidence(self):
+        """Intervention under 7 days -> low confidence despite large change."""
+        baseline_df = pd.DataFrame([{"category": "Shopping", "amount": 1000.0}])  # 100.0/day over 10 days
+        intervention_df = pd.DataFrame([{"category": "Shopping", "amount": 250.0}])  # 50.0/day over 5 days
+
+        res = evaluate_experiment("Shopping", baseline_df, intervention_df, 10, 5)
+
+        assert res["confidence"] == "low"
+        assert res["percent_difference"] == -50.0
+
+    def test_medium_confidence_cases(self):
+        """Intervention between 7 and 13 days with >20% change -> medium confidence."""
+        baseline_df = pd.DataFrame([{"category": "Entertainment", "amount": 1000.0}])  # 100.0/day over 10 days
+        intervention_df = pd.DataFrame([{"category": "Entertainment", "amount": 500.0}])  # 50.0/day over 10 days
+
+        res = evaluate_experiment("Entertainment", baseline_df, intervention_df, 10, 10)
+
+        assert res["confidence"] == "medium"
+
+
+
+
