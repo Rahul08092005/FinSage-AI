@@ -1,6 +1,9 @@
 import multer from "multer";
 import { Router } from "express";
+<<<<<<< HEAD
 import {
+=======
+>>>>>>> e6734f7 ("Something")
   createTransaction,
   deleteTransaction,
   listTransactions,
@@ -19,8 +22,6 @@ const router = Router();
 router.use(requireAuth);
 router.get("/", listTransactions);
 router.post("/", createTransaction);
-router.post("/parse-sms", parseSms);
-router.post("/confirm-sms", confirmSms);
 router.patch("/:id", updateTransaction);
 router.delete("/:id", deleteTransaction);
 

@@ -30,7 +30,7 @@ export async function exportReport(req: AuthedRequest, res: Response) {
     prisma.goal.findMany({ where: { userId: req.userId } }),
     prisma.user.findUnique({
       where: { id: req.userId },
-      select: { monthlySalary: true },
+      select: { monthlySalary: true, annualIncome: true, taxRegime: true },
     }),
   ]);
 
@@ -71,6 +71,7 @@ export async function exportReport(req: AuthedRequest, res: Response) {
     // Non-fatal — proceed with null score so the report still generates
   }
 
+<<<<<<< HEAD
   // --- 4. Build optional financial_plan and income payload --------------------
   let financialPlan: {
     monthly_salary: number | null;
@@ -100,6 +101,18 @@ export async function exportReport(req: AuthedRequest, res: Response) {
         now.getUTCMonth() >= 3
           ? new Date(Date.UTC(now.getUTCFullYear(), 3, 1))
           : new Date(Date.UTC(now.getUTCFullYear() - 1, 3, 1));
+=======
+  // --- 4. Unified Financial Plan / Income calculation ------------------------
+  const queryIncome = req.query.income ? Number(req.query.income) : undefined;
+  const query80c = req.query.current80c ? Number(req.query.current80c) : (req.query.current_investments ? Number(req.query.current_investments) : undefined);
+
+  let investment80cTotal = query80c ?? 0;
+  if (!query80c) {
+    try {
+      const fyStart = now.getUTCMonth() >= 3
+        ? new Date(Date.UTC(now.getUTCFullYear(), 3, 1))
+        : new Date(Date.UTC(now.getUTCFullYear() - 1, 3, 1));
+>>>>>>> e6734f7 ("Something")
 
       const investment80cAggregate = await prisma.transaction.aggregate({
         where: {
@@ -109,16 +122,33 @@ export async function exportReport(req: AuthedRequest, res: Response) {
         },
         _sum: { amount: true },
       });
-
-      financialPlan = {
-        monthly_salary: user.monthlySalary !== null ? Number(user.monthlySalary) : null,
-        annual_income: Number(user.annualIncome),
-        tax_regime: user.taxRegime ?? null,
-        investment_80c_ytd: Number(investment80cAggregate._sum.amount ?? 0),
-      };
+      investment80cTotal = Number(investment80cAggregate._sum.amount ?? 0);
+    } catch (err: any) {
+      console.error("[exportReport] Could not aggregate 80c investments:", err.message);
     }
+<<<<<<< HEAD
   } catch (err: any) {
     console.error("[exportReport] Could not fetch user for financial plan:", err.message);
+=======
+  }
+
+  const incomeVal = queryIncome ?? (user?.annualIncome ? Number(user.annualIncome) : (user?.monthlySalary ? Number(user.monthlySalary) * 12 : undefined));
+
+  let financialPlan: {
+    monthly_salary: number | null;
+    annual_income: number;
+    tax_regime: string | null;
+    investment_80c_ytd: number;
+  } | undefined;
+
+  if (user?.annualIncome != null || incomeVal != null) {
+    financialPlan = {
+      monthly_salary: user?.monthlySalary !== null && user?.monthlySalary !== undefined ? Number(user.monthlySalary) : null,
+      annual_income: Number(incomeVal ?? user?.annualIncome ?? 0),
+      tax_regime: user?.taxRegime ?? null,
+      investment_80c_ytd: investment80cTotal,
+    };
+>>>>>>> e6734f7 ("Something")
   }
 
   // --- 5. Call Rahul's report-generate endpoint ------------------------------
@@ -133,7 +163,11 @@ export async function exportReport(req: AuthedRequest, res: Response) {
         goals,
         health_score: healthScore,
         income: incomeVal,
+<<<<<<< HEAD
         current_investments: query80c ?? financialPlan?.investment_80c_ytd ?? 0,
+=======
+        current_investments: investment80cTotal,
+>>>>>>> e6734f7 ("Something")
         ...(financialPlan !== undefined ? { financial_plan: financialPlan } : {}),
       }),
     });
