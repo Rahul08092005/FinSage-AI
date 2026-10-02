@@ -597,3 +597,195 @@ class TestSimulateScenarioEndpointCompat:
         assert "annual_savings_delta" in result
         assert "category_projections" in result
         assert "summary" in result
+
+
+# ===========================================================================
+# Pattern Intelligence Engine Tests (Kavya — Step 5.1)
+# ===========================================================================
+
+
+from app.analytics.pattern_engine import (
+    detect_time_of_month_patterns,
+    detect_salary_triggered_spending,
+    detect_category_trend,
+    run_pattern_detection,
+)
+
+
+class TestPatternEngineTimeOfMonth:
+    """Verification for detect_time_of_month_patterns()."""
+
+    def test_catches_end_of_month_food_spike(self):
+        """Synthetic test DataFrame with obvious end-of-month food spike."""
+        rows = [
+            # Early (days 1-10): low food spend (100 total over 10 days = 10/day)
+            {"date": "2026-01-03", "amount": 50.0, "category": "Food"},
+            {"date": "2026-01-08", "amount": 50.0, "category": "Food"},
+            # Mid (days 11-20): moderate food spend (200 total over 10 days = 20/day)
+            {"date": "2026-01-13", "amount": 100.0, "category": "Food"},
+            {"date": "2026-01-18", "amount": 100.0, "category": "Food"},
+            # Late (days 21-31): heavy spike (2200 total over 11 days = 200/day)
+            {"date": "2026-01-22", "amount": 600.0, "category": "Food"},
+            {"date": "2026-01-25", "amount": 800.0, "category": "Food"},
+            {"date": "2026-01-29", "amount": 800.0, "category": "Food"},
+        ]
+        df = pd.DataFrame(rows)
+        patterns = detect_time_of_month_patterns(df)
+
+        assert len(patterns) == 1
+        pat = patterns[0]
+        assert pat["type"] == "pattern"
+        assert pat["category"] == "Food"
+        assert "late" in pat["title"].lower()
+        assert pat["evidence"]["peak_bucket"] == "late"
+        assert pat["evidence"]["peak_daily_avg"] == 200.0
+        assert pat["evidence"]["second_highest_avg"] == 20.0
+        assert pat["evidence"]["percentage_above_next"] > 30.0
+
+    def test_balanced_spending_produces_no_pattern(self):
+        """Evenly distributed spend across buckets does not trigger pattern."""
+        rows = [
+            {"date": "2026-01-05", "amount": 100.0, "category": "Rent"},
+            {"date": "2026-01-15", "amount": 100.0, "category": "Rent"},
+            {"date": "2026-01-25", "amount": 110.0, "category": "Rent"},
+        ]
+        df = pd.DataFrame(rows)
+        patterns = detect_time_of_month_patterns(df)
+        assert patterns == []
+
+    def test_empty_or_insufficient_data_returns_empty_list(self):
+        """Empty DataFrame or None returns empty list without error."""
+        assert detect_time_of_month_patterns(pd.DataFrame()) == []
+        assert detect_time_of_month_patterns(None) == []
+
+
+class TestPatternEngineSalaryTriggered:
+    """Verification for detect_salary_triggered_spending()."""
+
+    def test_catches_post_salary_discretionary_spike(self):
+        """Discretionary spend elevated in the 5 days following salary date."""
+        rows = [
+            # Salary arrives on day 1
+            {"date": "2026-01-01", "amount": 80000.0, "category": "Salary"},
+            # Days 2-6 (post-salary): heavy shopping/dining (5000 over 5 days = 1000/day)
+            {"date": "2026-01-02", "amount": 1200.0, "category": "Shopping"},
+            {"date": "2026-01-03", "amount": 1500.0, "category": "Food"},
+            {"date": "2026-01-04", "amount": 800.0, "category": "Entertainment"},
+            {"date": "2026-01-05", "amount": 1500.0, "category": "Shopping"},
+            # Rest of month: minimal discretionary spend (500 over 26 days ≈ 19.2/day)
+            {"date": "2026-01-15", "amount": 250.0, "category": "Food"},
+            {"date": "2026-01-22", "amount": 250.0, "category": "Shopping"},
+        ]
+        df = pd.DataFrame(rows)
+        pat = detect_salary_triggered_spending(df, salary_date_guess=1)
+
+        assert pat is not None
+        assert pat["type"] == "pattern"
+        assert pat["category"] == "Discretionary"
+        assert pat["evidence"]["salary_day"] == 1
+        assert pat["evidence"]["post_salary_daily_avg"] > pat["evidence"]["rest_of_month_daily_avg"]
+        assert pat["evidence"]["percentage_increase"] > 30.0
+
+    def test_detects_salary_day_automatically_when_not_provided(self):
+        """Finds recurring salary day from transaction category."""
+        rows = [
+            {"date": "2026-01-25", "amount": 75000.0, "category": "Salary"},
+            {"date": "2026-01-26", "amount": 2000.0, "category": "Shopping"},
+            {"date": "2026-01-27", "amount": 2000.0, "category": "Food"},
+        ]
+        df = pd.DataFrame(rows)
+        pat = detect_salary_triggered_spending(df, salary_date_guess=None)
+        assert pat is not None
+        assert pat["evidence"]["salary_day"] == 25
+
+    def test_empty_or_insufficient_returns_none(self):
+        """Returns None (not error) when given too little data."""
+        assert detect_salary_triggered_spending(pd.DataFrame(), salary_date_guess=1) is None
+        assert detect_salary_triggered_spending(None, salary_date_guess=1) is None
+        assert detect_salary_triggered_spending(pd.DataFrame([{"date": "2026-01-05", "amount": 100}]), salary_date_guess=None) is None
+
+
+class TestPatternEngineCategoryTrend:
+    """Verification for detect_category_trend()."""
+
+    def test_catches_upward_transport_trend(self):
+        """Synthetic upward transport trend across 4 months is caught."""
+        rows = [
+            {"date": "2026-01-15", "amount": 1000.0, "category": "Transport"},
+            {"date": "2026-02-15", "amount": 1300.0, "category": "Transport"},
+            {"date": "2026-03-15", "amount": 1600.0, "category": "Transport"},
+            {"date": "2026-04-15", "amount": 1900.0, "category": "Transport"},
+        ]
+        df = pd.DataFrame(rows)
+        pat = detect_category_trend(df, category="Transport", months=4)
+
+        assert pat is not None
+        assert pat["type"] == "pattern"
+        assert pat["category"] == "Transport"
+        assert "upward" in pat["title"].lower()
+        assert pat["evidence"]["slope"] == pytest.approx(300.0, rel=1e-2)
+        assert pat["evidence"]["months_analyzed"] == 4
+        assert pat["evidence"]["r_squared"] > 0.95
+
+    def test_flat_or_downward_trend_returns_none(self):
+        """Flat spending does not trigger upward trend pattern."""
+        rows = [
+            {"date": "2026-01-15", "amount": 5000.0, "category": "Rent"},
+            {"date": "2026-02-15", "amount": 5000.0, "category": "Rent"},
+            {"date": "2026-03-15", "amount": 5000.0, "category": "Rent"},
+            {"date": "2026-04-15", "amount": 5000.0, "category": "Rent"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_category_trend(df, category="Rent", months=4) is None
+
+    def test_insufficient_history_returns_none(self):
+        """Fewer than 3 months of history returns None."""
+        rows = [
+            {"date": "2026-01-15", "amount": 1000.0, "category": "Transport"},
+            {"date": "2026-02-15", "amount": 1500.0, "category": "Transport"},
+        ]
+        df = pd.DataFrame(rows)
+        assert detect_category_trend(df, category="Transport", months=4) is None
+        assert detect_category_trend(pd.DataFrame(), category="Transport") is None
+        assert detect_category_trend(None, category="Transport") is None
+
+
+class TestRunPatternDetection:
+    """Verification for run_pattern_detection() orchestration."""
+
+    def test_runs_all_detectors_and_combines_output(self):
+        """Combines time-of-month, salary-triggered, and category trend patterns."""
+        rows = [
+            # Salary on day 1
+            {"date": "2026-01-01", "amount": 80000.0, "category": "Salary"},
+            # Salary triggered shopping in days 2-6
+            {"date": "2026-01-02", "amount": 2500.0, "category": "Shopping"},
+            {"date": "2026-01-03", "amount": 2500.0, "category": "Shopping"},
+            # End of month Food spike (late bucket)
+            {"date": "2026-01-05", "amount": 50.0, "category": "Food"},
+            {"date": "2026-01-15", "amount": 50.0, "category": "Food"},
+            {"date": "2026-01-25", "amount": 1500.0, "category": "Food"},
+            {"date": "2026-01-28", "amount": 1500.0, "category": "Food"},
+            # Upward Transport trend across 4 months
+            {"date": "2026-01-10", "amount": 1000.0, "category": "Transport"},
+            {"date": "2026-02-10", "amount": 1300.0, "category": "Transport"},
+            {"date": "2026-03-10", "amount": 1600.0, "category": "Transport"},
+            {"date": "2026-04-10", "amount": 1900.0, "category": "Transport"},
+        ]
+        df = pd.DataFrame(rows)
+        patterns = run_pattern_detection(df, salary_day=1)
+
+        assert isinstance(patterns, list)
+        assert len(patterns) >= 2  # catches food spike, transport trend, and salary spike
+        for pat in patterns:
+            assert pat["type"] == "pattern"
+            assert "title" in pat
+            assert "evidence" in pat
+            assert "category" in pat
+
+    def test_empty_or_none_returns_empty_list(self):
+        """Returns empty list for empty DataFrame or None."""
+        assert run_pattern_detection(pd.DataFrame()) == []
+        assert run_pattern_detection(None) == []
+        assert run_pattern_detection([]) == []
+

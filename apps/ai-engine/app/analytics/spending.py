@@ -1,4 +1,5 @@
 """Analytics and deterministic financial math functions."""
+import numpy as np
 import pandas as pd
 
 
@@ -278,6 +279,26 @@ def calculate_health_score(
 # ---------------------------------------------------------------------------
 
 
+def fit_linear_trend(values: pd.Series | list[float] | np.ndarray) -> tuple[float, float]:
+    """Fit a simple linear trend (least-squares, numpy.polyfit degree=1).
+
+    Args:
+        values: Sequence of numeric values ordered chronologically.
+
+    Returns:
+        (slope, intercept) where y = slope * x + intercept, with x = 0, 1, ..., n-1.
+    """
+    import numpy as np
+
+    arr = np.asarray(values, dtype=float)
+    n = len(arr)
+    if n < 2:
+        return 0.0, float(arr[0]) if n == 1 else 0.0
+    x = np.arange(n, dtype=float)
+    slope, intercept = np.polyfit(x, arr, 1)
+    return float(slope), float(intercept)
+
+
 def forecast_expenses(transactions: pd.DataFrame, months_ahead: int = 1) -> dict:
     """Forecast future monthly spending per category.
 
@@ -370,14 +391,8 @@ def forecast_expenses(transactions: pd.DataFrame, months_ahead: int = 1) -> dict
         n_months = len(monthly_totals)
 
         if n_months >= 3:
-            # --- Linear trend (least-squares) ---
-            # x-axis: 0, 1, 2, ... (month indices)
-            # y-axis: monthly total spend
-            x = np.arange(n_months, dtype=float)
-            y = monthly_totals.values.astype(float)
-
-            # polyfit degree 1 => [slope, intercept]
-            slope, intercept = np.polyfit(x, y, 1)
+            # --- Linear trend (least-squares via shared helper) ---
+            slope, intercept = fit_linear_trend(monthly_totals.values)
 
             # Project forward: next month index = n_months, then n_months+1, ...
             # For months_ahead=1, projected value = slope*(n_months) + intercept
