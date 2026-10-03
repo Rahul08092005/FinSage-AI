@@ -1,20 +1,30 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
-import {
-  getGoals,
-  whatIfScenario,
-  WhatIfGoalProjection,
-  WhatIfScenarioResponse,
-} from "@/lib/api";
+import { getMe, getExpenseSummary, getGoals } from "@/lib/api";
 import { formatINR } from "@/lib/formatCurrency";
 
 interface WhatIfSimulatorProps {
   token: string;
 }
 
-// Map goal titles to contextual icons and accent styles (matches GoalCard.tsx design system)
+interface GoalItem {
+  id: string;
+  title: string;
+  targetAmount: number | string;
+  startDate?: string;
+  endDate: string;
+  createdAt?: string;
+}
+
+interface ExpenseCategoryItem {
+  category: string;
+  total: number;
+  count?: number;
+}
+
+// Map goal titles to contextual icons and accent styles (matches FinSage visual system)
 function getGoalPersonality(title: string) {
   const lower = (title || "").toLowerCase();
   if (lower.includes("headphone") || lower.includes("airpod") || lower.includes("audio") || lower.includes("music")) {
@@ -38,628 +48,744 @@ function getGoalPersonality(title: string) {
   return { icon: "🎯", tag: "MONEY MISSION", accentBg: "bg-lime-50/80", ringColor: "#84cc16", sticker: "✨" };
 }
 
-// Helper to format dates or month counts cleanly for display
-function formatTimeline(val?: string | number): string {
-  if (val === undefined || val === null || val === "") return "—";
-  if (typeof val === "number") {
-    return `${val} month${val === 1 ? "" : "s"}`;
+// Local storage helper for client-side tracked contributions
+function getGoalSaved(id: string): number {
+  if (typeof window === "undefined") return 0;
+  try {
+    const raw = localStorage.getItem(`finsage_goal_savings_${id}`);
+    return raw ? parseFloat(raw) || 0 : 0;
+  } catch {
+    return 0;
   }
-  const str = String(val).trim();
-  // Check if it's already a duration string like "14 months"
-  if (/^\d+\s*months?$/i.test(str)) {
-    return str;
-  }
-  // Try parsing date
-  const parsed = new Date(str);
-  if (!isNaN(parsed.getTime())) {
-    return parsed.toLocaleDateString("en-IN", {
-      month: "short",
-      year: "numeric",
-    });
-  }
-  return str;
-}
-
-// Compare before/after timeline to generate factual delta label
-function getTimelineDeltaBadge(original?: string | number, revised?: string | number, monthsDelta?: number) {
-  if (monthsDelta !== undefined && monthsDelta !== null) {
-    if (monthsDelta < 0) {
-      const abs = Math.abs(monthsDelta);
-      return {
-        label: `✓ ${abs} month${abs === 1 ? "" : "s"} sooner`,
-        bg: "bg-emerald-50 border-emerald-200 text-emerald-800",
-      };
-    }
-    if (monthsDelta > 0) {
-      return {
-        label: `⚡ ${monthsDelta} month${monthsDelta === 1 ? "" : "s"} later`,
-        bg: "bg-amber-50 border-amber-200 text-amber-800",
-      };
-    }
-    return {
-      label: "No change",
-      bg: "bg-stone-100 border-stone-200 text-stone-600",
-    };
-  }
-
-  // If dates are provided, compare timestamps
-  if (original && revised) {
-    const d1 = new Date(original).getTime();
-    const d2 = new Date(revised).getTime();
-    if (!isNaN(d1) && !isNaN(d2)) {
-      const diffDays = Math.round((d2 - d1) / (1000 * 60 * 60 * 24));
-      const diffMonths = Math.round(diffDays / 30.4);
-      if (diffMonths < 0) {
-        const abs = Math.abs(diffMonths);
-        return {
-          label: `✓ ${abs} month${abs === 1 ? "" : "s"} sooner`,
-          bg: "bg-emerald-50 border-emerald-200 text-emerald-800",
-        };
-      }
-      if (diffMonths > 0) {
-        return {
-          label: `⚡ ${diffMonths} month${diffMonths === 1 ? "" : "s"} later`,
-          bg: "bg-amber-50 border-amber-200 text-amber-800",
-        };
-      }
-      return {
-        label: "No change",
-        bg: "bg-stone-100 border-stone-200 text-stone-600",
-      };
-    }
-  }
-
-  return null;
 }
 
 export function WhatIfSimulator({ token }: WhatIfSimulatorProps) {
-  // Scenario Slider States (Neutral defaults = 0)
-  const [incomeDelta, setIncomeDelta] = useState<number>(0);
-  const [expenseDelta, setExpenseDelta] = useState<number>(0);
-  const [savingsRateDelta, setSavingsRateDelta] = useState<number>(0);
-
-  // User Goals Context State
-  const [hasGoals, setHasGoals] = useState<boolean | null>(null);
-  const [goalsCount, setGoalsCount] = useState<number>(0);
-
-  // Scenario Calculation States
-  const [isCalculating, setIsCalculating] = useState<boolean>(false);
-  const [scenarioResult, setScenarioResult] = useState<WhatIfScenarioResponse | null>(null);
+  // Raw Data fetched from existing endpoints
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [hasInteracted, setHasInteracted] = useState<boolean>(false);
+  const [salary, setSalary] = useState<number | null>(null);
+  const [categories, setCategories] = useState<ExpenseCategoryItem[]>([]);
+  const [totalExpenses, setTotalExpenses] = useState<number>(0);
+  const [goals, setGoals] = useState<GoalItem[]>([]);
 
-  // Request race-condition tracker
-  const requestIdRef = useRef<number>(0);
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Client-side Scenario Control States (Instant React state)
+  const [salaryChangePct, setSalaryChangePct] = useState<number>(0); // -20% to +30%
+  const [selectedCategory, setSelectedCategory] = useState<string>("");
+  const [expenseChangePct, setExpenseChangePct] = useState<number>(0); // -50% to +50%
+  const [contributionDelta, setContributionDelta] = useState<number>(0); // e.g. -25000 to +50000 INR
 
-  // Check if user has active goals on mount
-  useEffect(() => {
-    let isCancelled = false;
-    async function checkGoals() {
-      try {
-        const data = await getGoals(token);
-        if (!isCancelled) {
-          if (Array.isArray(data)) {
-            setHasGoals(data.length > 0);
-            setGoalsCount(data.length);
-          } else {
-            setHasGoals(false);
-          }
-        }
-      } catch {
-        if (!isCancelled) setHasGoals(false);
+  // Fetch initial data once on mount
+  async function loadData() {
+    setLoading(true);
+    setError(null);
+    try {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+      const currentMonthStr = `${year}-${month}`;
+
+      const [userRes, expenseRes, goalsRes] = await Promise.all([
+        getMe(token).catch((e) => {
+          console.warn("[WhatIfSimulator] getMe error:", e);
+          return null;
+        }),
+        getExpenseSummary(token, currentMonthStr).catch((e) => {
+          console.warn("[WhatIfSimulator] getExpenseSummary error:", e);
+          return null;
+        }),
+        getGoals(token).catch((e) => {
+          console.warn("[WhatIfSimulator] getGoals error:", e);
+          return [];
+        }),
+      ]);
+
+      if (!userRes && !expenseRes && (!goalsRes || (Array.isArray(goalsRes) && goalsRes.length === 0))) {
+        throw new Error("Couldn't load your scenario data. Please check your connection.");
       }
+
+      // 1. Extract salary
+      const rawSalary = userRes?.monthlySalary ?? userRes?.salary ?? null;
+      const parsedSalary = rawSalary !== null && rawSalary !== undefined ? Number(rawSalary) : null;
+      setSalary(parsedSalary && parsedSalary > 0 ? parsedSalary : null);
+
+      // 2. Extract expenses & category breakdown
+      if (expenseRes) {
+        const catList: ExpenseCategoryItem[] = Array.isArray(expenseRes.byCategory)
+          ? expenseRes.byCategory.map((c: any) => ({
+              category: String(c.category || "General"),
+              total: Number(c.total) || 0,
+              count: Number(c.count) || 0,
+            }))
+          : [];
+        setCategories(catList);
+        setTotalExpenses(Number(expenseRes.total) || 0);
+
+        if (catList.length > 0) {
+          setSelectedCategory(catList[0].category);
+        }
+      }
+
+      // 3. Extract goals
+      if (Array.isArray(goalsRes)) {
+        setGoals(goalsRes);
+      }
+    } catch (err: any) {
+      console.error("[WhatIfSimulator] Data load error:", err);
+      setError(err?.message || "Couldn't load your scenario data.");
+    } finally {
+      setLoading(false);
     }
-    checkGoals();
-    return () => {
-      isCancelled = true;
-    };
+  }
+
+  useEffect(() => {
+    loadData();
   }, [token]);
 
-  // Execute scenario calculation via backend
-  const executeSimulation = useCallback(
-    async (inc: number, exp: number, sav: number) => {
-      if (hasGoals === false) return;
-
-      const currentReqId = ++requestIdRef.current;
-      setIsCalculating(true);
-      setError(null);
-
-      try {
-        const res = await whatIfScenario(token, {
-          incomeDelta: inc,
-          expenseDelta: exp,
-          savingsRateDelta: sav,
-        });
-
-        // Ensure we only update state for the latest request
-        if (currentReqId === requestIdRef.current) {
-          setScenarioResult(res);
-        }
-      } catch (err: any) {
-        if (currentReqId === requestIdRef.current) {
-          console.error("[WhatIfSimulator] Scenario execution error:", err);
-          setError(
-            err?.message && !err.message.includes("[object")
-              ? err.message
-              : "Couldn't run that scenario right now. Your goals are safe — we just couldn't calculate this scenario."
-          );
-        }
-      } finally {
-        if (currentReqId === requestIdRef.current) {
-          setIsCalculating(false);
-        }
-      }
-    },
-    [token, hasGoals]
-  );
-
-  // Debounce scenario requests (400ms interval)
-  useEffect(() => {
-    if (!hasInteracted) return;
-
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-
-    debounceTimerRef.current = setTimeout(() => {
-      executeSimulation(incomeDelta, expenseDelta, savingsRateDelta);
-    }, 400);
-
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-    };
-  }, [incomeDelta, expenseDelta, savingsRateDelta, hasInteracted, executeSimulation]);
-
-  // Reset simulator to baseline
+  // Reset scenario controls back to 0% / baseline
   function handleReset() {
-    setIncomeDelta(0);
-    setExpenseDelta(0);
-    setSavingsRateDelta(0);
-    setHasInteracted(false);
-    setScenarioResult(null);
-    setError(null);
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
+    setSalaryChangePct(0);
+    setExpenseChangePct(0);
+    setContributionDelta(0);
+    if (categories.length > 0) {
+      setSelectedCategory(categories[0].category);
     }
   }
 
-  // Quick preset handlers for instant scenario exploration
-  function applyPreset(inc: number, exp: number, sav: number) {
-    setHasInteracted(true);
-    setIncomeDelta(inc);
-    setExpenseDelta(exp);
-    setSavingsRateDelta(sav);
-  }
+  const isScenarioActive = salaryChangePct !== 0 || expenseChangePct !== 0 || contributionDelta !== 0;
 
-  // Formatting helpers for slider labels
-  const formatDeltaINR = (val: number) => {
-    if (val === 0) return "₹0 (Current)";
-    const sign = val > 0 ? "+" : "-";
-    return `${sign}${formatINR(Math.abs(val))}/mo`;
-  };
+  // Selected Category expense calculation
+  const currentCategoryExpense = useMemo(() => {
+    const found = categories.find((c) => c.category === selectedCategory);
+    return found ? found.total : 0;
+  }, [categories, selectedCategory]);
 
-  const formatDeltaRate = (val: number) => {
-    if (val === 0) return "0 pts (Baseline)";
-    const sign = val > 0 ? "+" : "";
-    return `${sign}${val} pts (${sign}${val}%)`;
-  };
+  // Instant Client-Side Scenario Calculations
+  const calculations = useMemo(() => {
+    const currentSalary = salary ?? 0;
+    const currentExpenses = totalExpenses;
 
-  return (
-    <div className="mt-8 rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-4 sm:p-6 shadow-sm transition-all hover:border-[#84cc16]/40">
-      {/* 1. GEN-Z HERO HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-[#E5DAC4]/60 pb-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="inline-flex items-center gap-1 rounded-full bg-[#84cc16]/20 border border-[#84cc16]/30 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-widest text-[#3f6212]">
-              ✦ WHAT IF?
-            </span>
-            {isCalculating && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#84cc16] animate-pulse">
-                <span>Crunching your scenario…</span>
-                <span className="animate-spin">✦</span>
-              </span>
-            )}
+    // 1. Projected Salary
+    const projectedSalary = Math.round(currentSalary * (1 + salaryChangePct / 100));
+
+    // 2. Adjusted Category Expense
+    const adjustedCategoryExpense = Math.round(currentCategoryExpense * (1 + expenseChangePct / 100));
+
+    // 3. Adjusted Total Expenses (modifying ONLY the selected category)
+    const adjustedTotalExpenses = Math.max(
+      0,
+      Math.round(currentExpenses - currentCategoryExpense + adjustedCategoryExpense)
+    );
+
+    // 4. Baseline & Projected Monthly Savings
+    const baselineMonthlySavings = currentSalary - currentExpenses;
+    const projectedMonthlySavings = (projectedSalary - adjustedTotalExpenses) + contributionDelta;
+    const savingsDelta = projectedMonthlySavings - baselineMonthlySavings;
+
+    // 5. Goal Timeline Projections
+    const goalProjections = goals.map((goal) => {
+      const savedAmount = getGoalSaved(goal.id);
+      const targetAmount = Number(goal.targetAmount) || 0;
+      const remainingAmount = Math.max(0, targetAmount - savedAmount);
+
+      let baselineMonths: number | null = null;
+      if (baselineMonthlySavings > 0) {
+        baselineMonths = Math.ceil(remainingAmount / baselineMonthlySavings);
+      }
+
+      let projectedMonths: number | null = null;
+      if (projectedMonthlySavings > 0) {
+        projectedMonths = Math.ceil(remainingAmount / projectedMonthlySavings);
+      }
+
+      let monthsDelta: number | null = null;
+      if (baselineMonths !== null && projectedMonths !== null) {
+        monthsDelta = baselineMonths - projectedMonths; // positive means sooner, negative means later
+      }
+
+      return {
+        goal,
+        savedAmount,
+        targetAmount,
+        remainingAmount,
+        baselineMonths,
+        projectedMonths,
+        monthsDelta,
+      };
+    });
+
+    return {
+      currentSalary,
+      currentExpenses,
+      projectedSalary,
+      adjustedCategoryExpense,
+      adjustedTotalExpenses,
+      baselineMonthlySavings,
+      projectedMonthlySavings,
+      savingsDelta,
+      goalProjections,
+    };
+  }, [
+    salary,
+    totalExpenses,
+    categories,
+    selectedCategory,
+    currentCategoryExpense,
+    salaryChangePct,
+    expenseChangePct,
+    contributionDelta,
+    goals,
+  ]);
+
+  // Loading skeleton
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-5xl px-4 py-8">
+        <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-8 text-center shadow-xs">
+          <div className="mx-auto w-10 h-10 rounded-full bg-lime-400/20 flex items-center justify-center text-lg animate-pulse mb-3">
+            ✦
           </div>
-          <h2 className="font-serif text-xl sm:text-2xl font-black tracking-tight text-[#18122B]">
-            Change the numbers. See your future shift.
+          <h2 className="font-serif text-lg font-bold text-[#18122B]">
+            Loading your money universe…
           </h2>
-          <p className="text-xs sm:text-sm text-[#18122B]/65 font-medium mt-0.5">
-            Play with your income, spending and savings rate. We&apos;ll run the scenario for you.
+          <p className="mt-1 text-xs text-stone-500 font-medium">
+            Fetching your latest income, expenses, and goals for live simulation.
           </p>
         </div>
+      </div>
+    );
+  }
 
-        {/* Action / Reset Button */}
-        {hasInteracted && (
+  // Error state
+  if (error) {
+    return (
+      <div className="mx-auto max-w-5xl px-4 py-8">
+        <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-8 text-center shadow-xs">
+          <div className="mx-auto w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center text-lg text-rose-700 mb-3">
+            ⚠️
+          </div>
+          <h2 className="font-serif text-lg font-bold text-rose-900">
+            Couldn&apos;t load your scenario data
+          </h2>
+          <p className="mt-1 text-xs text-rose-700 max-w-md mx-auto font-medium">
+            {error}
+          </p>
           <button
             type="button"
-            onClick={handleReset}
-            className="self-start sm:self-auto inline-flex items-center gap-1.5 rounded-full border border-[#E5DAC4] bg-white px-3.5 py-1.5 text-xs font-semibold text-[#18122B]/70 hover:bg-[#FAF7F2] hover:text-[#18122B] transition cursor-pointer"
+            onClick={loadData}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-rose-700 px-4 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-rose-800 transition cursor-pointer"
           >
-            <span>↺</span>
-            <span>Reset scenario</span>
+            ↺ Try again
           </button>
-        )}
-      </div>
-
-      {/* 2. NO GOALS EMPTY STATE */}
-      {hasGoals === false ? (
-        <div className="mt-6 rounded-2xl border border-dashed border-[#DDD9CF] bg-[#FAF8F5] p-8 text-center shadow-xs">
-          <div className="mx-auto w-12 h-12 rounded-full bg-lime-400/25 flex items-center justify-center text-xl mb-3">
-            🎯
-          </div>
-          <h3 className="font-serif text-lg font-bold text-[#18122B]">
-            NO MONEY MISSIONS YET ✦
-          </h3>
-          <p className="mt-1.5 text-xs sm:text-sm text-stone-500 max-w-md mx-auto font-medium">
-            Create a goal first, then we&apos;ll show you how different choices could change your completion timeline.
-          </p>
-          <Link
-            href="/goals"
-            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#18122B] px-5 py-2 text-xs font-bold text-white shadow-md hover:bg-stone-800 transition"
-          >
-            <span>+ Create your first goal</span>
-            <span className="text-[#84cc16]">→</span>
-          </Link>
         </div>
-      ) : (
-        /* 3. SIMULATOR GRID: CONTROLS (LEFT) & RESULTS (RIGHT) */
-        <div className="mt-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
-          {/* LEFT COLUMN: SCENARIO CONTROLS */}
-          <div className="lg:col-span-5 flex flex-col justify-between space-y-4 rounded-xl border border-[#E5DAC4]/80 bg-[#FAF8F5] p-4 sm:p-5">
-            <div>
-              <div className="flex items-center justify-between mb-3 border-b border-[#E5DAC4]/60 pb-2">
-                <span className="text-[10px] font-black uppercase tracking-wider text-[#18122B]/70">
-                  ✦ SCENARIO PARAMETERS
-                </span>
-                <span className="text-[10px] text-[#18122B]/40 font-mono">
-                  {goalsCount} active goal{goalsCount === 1 ? "" : "s"}
-                </span>
-              </div>
+      </div>
+    );
+  }
 
-              {/* Sliders Stack */}
-              <div className="space-y-4">
-                {/* 1. Income Slider */}
-                <div>
-                  <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <label
-                      htmlFor="whatif-income-slider"
-                      className="text-xs font-bold text-[#18122B] flex items-center gap-1.5"
-                    >
-                      <span>💰</span>
-                      <span>Monthly Income</span>
-                    </label>
-                    <span
-                      className={`font-serif text-xs font-bold px-2 py-0.5 rounded ${
-                        incomeDelta > 0
-                          ? "bg-emerald-100/80 text-emerald-800"
-                          : incomeDelta < 0
-                          ? "bg-amber-100/80 text-amber-800"
-                          : "bg-stone-200/60 text-stone-700"
-                      }`}
-                    >
-                      {formatDeltaINR(incomeDelta)}
-                    </span>
-                  </div>
-                  <input
-                    id="whatif-income-slider"
-                    type="range"
-                    min={-50000}
-                    max={100000}
-                    step={2500}
-                    value={incomeDelta}
-                    onChange={(e) => {
-                      setHasInteracted(true);
-                      setIncomeDelta(Number(e.target.value));
-                    }}
-                    className="w-full accent-[#18122B] cursor-pointer"
-                    aria-label="Monthly income delta in INR"
-                  />
-                  <div className="flex justify-between text-[10px] text-stone-400 font-medium mt-0.5">
-                    <span>-₹50K</span>
-                    <span>₹0</span>
-                    <span>+₹100K</span>
-                  </div>
-                </div>
+  // Missing Salary Fallback State
+  if (!salary || salary <= 0) {
+    return (
+      <div className="mx-auto max-w-5xl px-4 py-8">
+        <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-8 text-center shadow-xs">
+          <div className="mx-auto w-12 h-12 rounded-full bg-[#84cc16]/20 border border-[#84cc16]/30 flex items-center justify-center text-2xl mb-3">
+            💰
+          </div>
+          <div className="inline-flex items-center gap-1 rounded-full bg-[#84cc16]/20 border border-[#84cc16]/30 px-3 py-0.5 text-[10px] font-black uppercase tracking-widest text-[#3f6212] mb-2">
+            SET YOUR SALARY FIRST ✦
+          </div>
+          <h2 className="font-serif text-xl sm:text-2xl font-black text-[#18122B]">
+            Add your monthly salary to run a What-If scenario.
+          </h2>
+          <p className="mt-2 text-xs sm:text-sm text-stone-500 max-w-md mx-auto font-medium leading-relaxed">
+            The scenario tool needs your baseline monthly income to compute live savings projections and goal timelines.
+          </p>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-1.5 rounded-full bg-[#18122B] px-5 py-2 text-xs font-bold text-white shadow-md hover:bg-stone-800 transition"
+            >
+              <span>Go to Dashboard to set salary</span>
+              <span className="text-[#84cc16]">→</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-                {/* 2. Expenses Slider */}
-                <div>
-                  <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <label
-                      htmlFor="whatif-expense-slider"
-                      className="text-xs font-bold text-[#18122B] flex items-center gap-1.5"
-                    >
-                      <span>📉</span>
-                      <span>Monthly Spending</span>
-                    </label>
-                    <span
-                      className={`font-serif text-xs font-bold px-2 py-0.5 rounded ${
-                        expenseDelta < 0
-                          ? "bg-emerald-100/80 text-emerald-800"
-                          : expenseDelta > 0
-                          ? "bg-rose-100/80 text-rose-800"
-                          : "bg-stone-200/60 text-stone-700"
-                      }`}
-                    >
-                      {formatDeltaINR(expenseDelta)}
-                    </span>
-                  </div>
-                  <input
-                    id="whatif-expense-slider"
-                    type="range"
-                    min={-50000}
-                    max={50000}
-                    step={1000}
-                    value={expenseDelta}
-                    onChange={(e) => {
-                      setHasInteracted(true);
-                      setExpenseDelta(Number(e.target.value));
-                    }}
-                    className="w-full accent-[#18122B] cursor-pointer"
-                    aria-label="Monthly expense delta in INR"
-                  />
-                  <div className="flex justify-between text-[10px] text-stone-400 font-medium mt-0.5">
-                    <span>-₹50K (Save more)</span>
-                    <span>₹0</span>
-                    <span>+₹50K (Spend more)</span>
-                  </div>
-                </div>
-
-                {/* 3. Savings Rate Slider */}
-                <div>
-                  <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <label
-                      htmlFor="whatif-savings-slider"
-                      className="text-xs font-bold text-[#18122B] flex items-center gap-1.5"
-                    >
-                      <span>⚡</span>
-                      <span>Savings Rate</span>
-                    </label>
-                    <span
-                      className={`font-serif text-xs font-bold px-2 py-0.5 rounded ${
-                        savingsRateDelta > 0
-                          ? "bg-emerald-100/80 text-emerald-800"
-                          : savingsRateDelta < 0
-                          ? "bg-amber-100/80 text-amber-800"
-                          : "bg-stone-200/60 text-stone-700"
-                      }`}
-                    >
-                      {formatDeltaRate(savingsRateDelta)}
-                    </span>
-                  </div>
-                  <input
-                    id="whatif-savings-slider"
-                    type="range"
-                    min={-20}
-                    max={30}
-                    step={1}
-                    value={savingsRateDelta}
-                    onChange={(e) => {
-                      setHasInteracted(true);
-                      setSavingsRateDelta(Number(e.target.value));
-                    }}
-                    className="w-full accent-[#18122B] cursor-pointer"
-                    aria-label="Savings rate delta in percentage points"
-                  />
-                  <div className="flex justify-between text-[10px] text-stone-400 font-medium mt-0.5">
-                    <span>-20%</span>
-                    <span>0%</span>
-                    <span>+30%</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Quick Preset Buttons */}
-              <div className="mt-4 pt-3 border-t border-[#E5DAC4]/60">
-                <span className="text-[10px] font-bold text-[#18122B]/60 uppercase tracking-wider block mb-2">
-                  ✦ Quick Scenarios:
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => applyPreset(10000, 0, 0)}
-                    className="rounded-full border border-stone-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#18122B] hover:bg-lime-400/20 hover:border-lime-500/40 transition cursor-pointer"
-                  >
-                    🚀 +₹10K Raise
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applyPreset(0, -5000, 0)}
-                    className="rounded-full border border-stone-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#18122B] hover:bg-lime-400/20 hover:border-lime-500/40 transition cursor-pointer"
-                  >
-                    ✂️ -₹5K Spend Trim
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applyPreset(0, 0, 5)}
-                    className="rounded-full border border-stone-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#18122B] hover:bg-lime-400/20 hover:border-lime-500/40 transition cursor-pointer"
-                  >
-                    💎 +5% Super Saver
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applyPreset(10000, -5000, 5)}
-                    className="rounded-full border border-stone-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#18122B] hover:bg-lime-400/20 hover:border-lime-500/40 transition cursor-pointer"
-                  >
-                    🔥 Max Acceleration
-                  </button>
-                </div>
-              </div>
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:py-8 space-y-6">
+      {/* 1. INTRO / HERO SECTION */}
+      <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-5 sm:p-6 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#E5DAC4]/60 pb-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="inline-flex items-center gap-1 rounded-full bg-[#84cc16]/20 border border-[#84cc16]/30 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-widest text-[#3f6212]">
+                ✦ WHAT IF?
+              </span>
+              <span className="text-[11px] font-medium text-stone-500">
+                money alternate universe ✦
+              </span>
             </div>
-
-            <div className="pt-2 text-[10px] text-[#18122B]/40 font-mono">
-              Debounced backend execution &middot; Backend source of truth
-            </div>
+            <h1 className="font-serif text-2xl sm:text-3xl font-black tracking-tight text-[#18122B]">
+              Change the numbers. See what happens.
+            </h1>
+            <p className="text-xs sm:text-sm text-stone-600 font-medium mt-1">
+              Adjust your income, category spending, or savings contribution to see instant client-side projections.
+            </p>
           </div>
 
-          {/* RIGHT COLUMN: SCENARIO PROJECTION RESULTS */}
-          <div className="lg:col-span-7 flex flex-col justify-between rounded-xl border border-[#E5DAC4]/80 bg-white p-4 sm:p-5 shadow-xs min-h-[320px]">
-            {/* Header / Scenario Tag */}
-            <div>
-              <div className="flex items-center justify-between border-b border-[#E5DAC4]/60 pb-2 mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-black uppercase tracking-wider text-[#18122B]/80">
-                    ✦ YOUR SCENARIO
-                  </span>
-                  {hasInteracted && !isCalculating && !error && (
-                    <span className="rounded-full bg-emerald-100 text-emerald-800 font-semibold px-2 py-0.5 text-[10px]">
-                      Scenario loaded
+          {/* Reset & Status */}
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            {isScenarioActive && (
+              <button
+                type="button"
+                onClick={handleReset}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#E5DAC4] bg-white px-3.5 py-1.5 text-xs font-semibold text-[#18122B]/80 hover:bg-[#FAF7F2] hover:text-[#18122B] shadow-2xs transition cursor-pointer"
+              >
+                <span>↺</span>
+                <span>Reset scenario</span>
+              </button>
+            )}
+            <span className="rounded-full bg-[#FAF8F5] border border-[#E5DAC4] px-3 py-1 text-[11px] font-mono text-stone-600">
+              run the numbers 👀
+            </span>
+          </div>
+        </div>
+
+        {/* 2. MAIN SIMULATOR TWO-COLUMN LAYOUT */}
+        <div className="mt-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* LEFT COLUMN: SCENARIO CONTROLS */}
+          <div className="lg:col-span-5 flex flex-col justify-between space-y-5 rounded-xl border border-[#E5DAC4]/80 bg-[#FAF8F5] p-4 sm:p-5">
+            <div className="space-y-5">
+              <div className="flex items-center justify-between border-b border-[#E5DAC4]/60 pb-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#18122B]/70">
+                  ✦ SCENARIO CONTROLS
+                </span>
+                <span className="text-[10px] font-mono text-stone-500">
+                  Client-side instant
+                </span>
+              </div>
+
+              {/* CONTROL 1 — SALARY SLIDER */}
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label
+                    htmlFor="whatif-salary-slider"
+                    className="text-xs font-bold text-[#18122B] flex items-center gap-1.5"
+                  >
+                    <span>💼</span>
+                    <span>SALARY CHANGE</span>
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className={`font-mono text-xs font-bold px-2 py-0.5 rounded ${
+                        salaryChangePct > 0
+                          ? "bg-emerald-100 text-emerald-800"
+                          : salaryChangePct < 0
+                          ? "bg-amber-100 text-amber-800"
+                          : "bg-stone-200/70 text-stone-700"
+                      }`}
+                    >
+                      {salaryChangePct > 0 ? `+${salaryChangePct}%` : `${salaryChangePct}%`}
                     </span>
-                  )}
+                  </div>
+                </div>
+                <p className="text-[11px] text-stone-500 mb-2">
+                  What if your income changed? (Baseline: {formatINR(calculations.currentSalary)}/mo)
+                </p>
+                <input
+                  id="whatif-salary-slider"
+                  type="range"
+                  min={-20}
+                  max={30}
+                  step={1}
+                  value={salaryChangePct}
+                  onChange={(e) => setSalaryChangePct(Number(e.target.value))}
+                  className="w-full accent-[#18122B] cursor-pointer"
+                  aria-label="Salary change percentage"
+                />
+                <div className="flex justify-between text-[10px] font-mono text-stone-400 mt-1">
+                  <span>-20%</span>
+                  <span>-10%</span>
+                  <span className="font-bold text-stone-600">0%</span>
+                  <span>+10%</span>
+                  <span>+20%</span>
+                  <span>+30%</span>
+                </div>
+                <div className="mt-1.5 text-right">
+                  <span className="text-[11px] font-medium text-stone-600">
+                    Projected Income:{" "}
+                    <strong className="font-serif font-bold text-[#18122B]">
+                      {formatINR(calculations.projectedSalary)}
+                    </strong>
+                    /mo
+                  </span>
+                </div>
+              </div>
+
+              {/* CONTROL 2 — EXPENSE CATEGORY SELECTION + SLIDER */}
+              <div className="pt-3 border-t border-[#E5DAC4]/60">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <label
+                    htmlFor="whatif-category-select"
+                    className="text-xs font-bold text-[#18122B] flex items-center gap-1.5"
+                  >
+                    <span>🏷️</span>
+                    <span>EXPENSE CATEGORY</span>
+                  </label>
+                  <span
+                    className={`font-mono text-xs font-bold px-2 py-0.5 rounded ${
+                      expenseChangePct < 0
+                        ? "bg-emerald-100 text-emerald-800"
+                        : expenseChangePct > 0
+                        ? "bg-rose-100 text-rose-800"
+                        : "bg-stone-200/70 text-stone-700"
+                    }`}
+                  >
+                    {expenseChangePct > 0 ? `+${expenseChangePct}%` : `${expenseChangePct}%`}
+                  </span>
                 </div>
 
-                {isCalculating && (
-                  <span className="text-[10px] font-bold text-[#84cc16] flex items-center gap-1">
-                    <span>Running the numbers…</span>
-                    <span className="animate-spin">✦</span>
-                  </span>
+                {categories.length > 0 ? (
+                  <>
+                    <div className="mb-2">
+                      <select
+                        id="whatif-category-select"
+                        value={selectedCategory}
+                        onChange={(e) => setSelectedCategory(e.target.value)}
+                        className="w-full rounded-lg border border-[#E5DAC4] bg-white px-3 py-1.5 text-xs font-semibold text-[#18122B] focus:border-[#84cc16] focus:outline-none shadow-2xs"
+                        aria-label="Select expense category to adjust"
+                      >
+                        {categories.map((cat) => (
+                          <option key={cat.category} value={cat.category}>
+                            {cat.category} ({formatINR(cat.total)}/mo)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <p className="text-[11px] text-stone-500 mb-2">
+                      What if spending on <strong>{selectedCategory}</strong> changed?
+                    </p>
+
+                    <input
+                      id="whatif-expense-slider"
+                      type="range"
+                      min={-50}
+                      max={50}
+                      step={1}
+                      value={expenseChangePct}
+                      onChange={(e) => setExpenseChangePct(Number(e.target.value))}
+                      className="w-full accent-[#18122B] cursor-pointer"
+                      aria-label="Category expense change percentage"
+                    />
+                    <div className="flex justify-between text-[10px] font-mono text-stone-400 mt-1">
+                      <span>-50% (Cut back)</span>
+                      <span className="font-bold text-stone-600">0%</span>
+                      <span>+50% (Spend more)</span>
+                    </div>
+
+                    <div className="mt-1.5 flex justify-between text-[11px] font-medium text-stone-600">
+                      <span>
+                        Category:{" "}
+                        <strong className="font-serif font-bold text-[#18122B]">
+                          {formatINR(calculations.adjustedCategoryExpense)}
+                        </strong>
+                      </span>
+                      <span>
+                        Total Expenses:{" "}
+                        <strong className="font-serif font-bold text-[#18122B]">
+                          {formatINR(calculations.adjustedTotalExpenses)}
+                        </strong>
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs text-stone-500 italic">
+                    No category breakdown found for current month. Total expenses: {formatINR(totalExpenses)}.
+                  </p>
                 )}
               </div>
 
-              {/* Error Alert */}
-              {error && (
-                <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 mb-3 animate-in fade-in">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-bold text-rose-800">
-                        Couldn&apos;t run that scenario right now.
-                      </p>
-                      <p className="text-[11px] text-rose-600 mt-0.5">
-                        {error}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => executeSimulation(incomeDelta, expenseDelta, savingsRateDelta)}
-                      className="rounded-lg bg-rose-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-800 transition cursor-pointer shrink-0"
-                    >
-                      Try again
-                    </button>
+              {/* CONTROL 3 — SIP / SAVINGS CONTRIBUTION SLIDER */}
+              <div className="pt-3 border-t border-[#E5DAC4]/60">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label
+                    htmlFor="whatif-sip-slider"
+                    className="text-xs font-bold text-[#18122B] flex items-center gap-1.5"
+                  >
+                    <span>⚡</span>
+                    <span>MONTHLY SIP / SAVINGS DELTA</span>
+                  </label>
+                  <span
+                    className={`font-mono text-xs font-bold px-2 py-0.5 rounded ${
+                      contributionDelta > 0
+                        ? "bg-emerald-100 text-emerald-800"
+                        : contributionDelta < 0
+                        ? "bg-amber-100 text-amber-800"
+                        : "bg-stone-200/70 text-stone-700"
+                    }`}
+                  >
+                    {contributionDelta > 0
+                      ? `+${formatINR(contributionDelta)}/mo`
+                      : contributionDelta < 0
+                      ? `-${formatINR(Math.abs(contributionDelta))}/mo`
+                      : "₹0 change"}
+                  </span>
+                </div>
+                <p className="text-[11px] text-stone-500 mb-2">
+                  Allocate an additional monthly lump sum or SIP contribution to savings.
+                </p>
+                <input
+                  id="whatif-sip-slider"
+                  type="range"
+                  min={-25000}
+                  max={50000}
+                  step={1000}
+                  value={contributionDelta}
+                  onChange={(e) => setContributionDelta(Number(e.target.value))}
+                  className="w-full accent-[#18122B] cursor-pointer"
+                  aria-label="Monthly savings or SIP contribution change in INR"
+                />
+                <div className="flex justify-between text-[10px] font-mono text-stone-400 mt-1">
+                  <span>-₹25,000</span>
+                  <span className="font-bold text-stone-600">₹0</span>
+                  <span>+₹50,000</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Tag */}
+            <div className="pt-3 border-t border-[#E5DAC4]/60 flex items-center justify-between text-[10px] text-stone-500 font-mono">
+              <span>✦ NAIVE CLIENT-SIDE ESTIMATE</span>
+              <span>NO DATA MUTATION</span>
+            </div>
+          </div>
+
+          {/* RIGHT COLUMN: PROJECTED SAVINGS & GOAL TIMELINES */}
+          <div className="lg:col-span-7 space-y-5">
+            {/* HERO RESULT: PROJECTED MONTHLY SAVINGS */}
+            <div className="rounded-xl border border-[#E5DAC4] bg-[#FFFDF8] p-5 sm:p-6 shadow-xs relative overflow-hidden">
+              <div className="flex items-center justify-between border-b border-[#E5DAC4]/60 pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#18122B]/70">
+                    ✦ THE MONEY MULTIVERSE
+                  </span>
+                  {isScenarioActive ? (
+                    <span className="rounded-full bg-emerald-100 text-emerald-800 font-semibold px-2.5 py-0.5 text-[10px]">
+                      Your future just moved.
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-stone-100 text-stone-600 font-medium px-2 py-0.5 text-[10px]">
+                      Baseline
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10px] font-mono text-stone-400">
+                  Instant Projection
+                </span>
+              </div>
+
+              {/* BIG STAT */}
+              <div className="mt-4 flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500">
+                    PROJECTED MONTHLY SAVINGS
+                  </span>
+                  <div className="font-serif text-3xl sm:text-4xl font-black text-[#18122B] tracking-tight mt-0.5">
+                    {formatINR(calculations.projectedMonthlySavings)}
                   </div>
                 </div>
-              )}
 
-              {/* Initial State (Before User Interaction) */}
-              {!hasInteracted && !scenarioResult && !error && (
-                <div className="py-10 text-center">
-                  <span className="text-3xl">🔮</span>
-                  <h3 className="font-serif text-base font-bold text-[#18122B] mt-2">
-                    Adjust a number to run your first scenario.
+                <div className="flex items-center gap-2">
+                  {calculations.savingsDelta !== 0 && (
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${
+                        calculations.savingsDelta > 0
+                          ? "bg-emerald-50 border border-emerald-200 text-emerald-800"
+                          : "bg-rose-50 border border-rose-200 text-rose-800"
+                      }`}
+                    >
+                      <span>{calculations.savingsDelta > 0 ? "▲" : "▼"}</span>
+                      <span>
+                        {calculations.savingsDelta > 0 ? "+" : "-"}
+                        {formatINR(Math.abs(calculations.savingsDelta))} / month
+                      </span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Current vs Scenario Comparison Strip */}
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3 rounded-lg bg-[#FAF8F5] p-3 border border-[#E5DAC4]/60 text-xs">
+                <div>
+                  <span className="text-[10px] font-bold text-stone-400 uppercase block">
+                    Current Monthly Savings
+                  </span>
+                  <span className="font-serif font-bold text-stone-700 text-sm">
+                    {formatINR(calculations.baselineMonthlySavings)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-stone-400 uppercase block">
+                    Scenario Monthly Savings
+                  </span>
+                  <span className="font-serif font-bold text-[#3f6212] text-sm">
+                    {formatINR(calculations.projectedMonthlySavings)}
+                  </span>
+                </div>
+                <div className="col-span-2 sm:col-span-1">
+                  <span className="text-[10px] font-bold text-stone-400 uppercase block">
+                    Scenario Impact
+                  </span>
+                  <span className="font-medium text-stone-700 text-xs">
+                    {calculations.savingsDelta > 0
+                      ? `+${formatINR(calculations.savingsDelta * 12)} / year`
+                      : calculations.savingsDelta < 0
+                      ? `-${formatINR(Math.abs(calculations.savingsDelta * 12))} / year`
+                      : "No change from baseline"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* GOAL TIMELINE COMPARISONS */}
+            <div className="rounded-xl border border-[#E5DAC4] bg-[#FFFDF8] p-5 shadow-xs">
+              <div className="flex items-center justify-between border-b border-[#E5DAC4]/60 pb-3 mb-4">
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#18122B]/70 block">
+                    ✦ GOAL TIMELINE COMPARISON
+                  </span>
+                  <h3 className="font-serif text-base font-bold text-[#18122B]">
+                    Money Missions Under This Scenario
                   </h3>
-                  <p className="text-xs text-stone-500 max-w-sm mx-auto mt-1 font-medium">
-                    Move the sliders on the left to see how changes to income, spending, or savings rate immediately alter your goal timelines.
+                </div>
+                <span className="text-[10px] font-mono text-stone-400">
+                  {goals.length} goal{goals.length === 1 ? "" : "s"}
+                </span>
+              </div>
+
+              {goals.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-[#DDD9CF] bg-[#FAF8F5] p-6 text-center">
+                  <p className="text-xs text-stone-500 font-medium">
+                    No active goals found. Create goals to see how this scenario accelerates your completion timelines!
+                  </p>
+                  <Link
+                    href="/goals"
+                    className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-[#18122B] hover:text-[#3f6212]"
+                  >
+                    <span>Go to Goals page</span>
+                    <span>→</span>
+                  </Link>
+                </div>
+              ) : calculations.projectedMonthlySavings <= 0 ? (
+                /* Edge Case: Negative or Zero Savings */
+                <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-5 text-center">
+                  <div className="mx-auto w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-sm text-amber-800 mb-2">
+                    ⚠️
+                  </div>
+                  <h4 className="font-serif text-sm font-bold text-amber-900">
+                    Timeline unavailable
+                  </h4>
+                  <p className="text-xs text-amber-800 max-w-md mx-auto mt-1 font-medium">
+                    At this scenario, monthly savings ({formatINR(calculations.projectedMonthlySavings)}) are not positive enough to project a completion timeline.
                   </p>
                 </div>
-              )}
+              ) : (
+                <div className="space-y-3">
+                  {calculations.goalProjections.map((proj) => {
+                    const personality = getGoalPersonality(proj.goal.title);
+                    return (
+                      <div
+                        key={proj.goal.id}
+                        className="rounded-xl border border-stone-200 bg-[#FAF8F5] p-4 shadow-2xs hover:border-[#84cc16]/40 transition"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg p-1 rounded-md bg-white border border-[#E5DAC4]">
+                              {personality.icon}
+                            </span>
+                            <div>
+                              <span className="text-[9px] font-bold tracking-wider uppercase text-stone-400">
+                                {personality.tag}
+                              </span>
+                              <h4 className="font-serif text-sm font-bold text-[#18122B]">
+                                {proj.goal.title}
+                              </h4>
+                            </div>
+                          </div>
 
-              {/* Scenario Results List */}
-              {scenarioResult && (
-                <div className={`space-y-3 transition-opacity duration-200 ${isCalculating ? "opacity-60" : "opacity-100"}`}>
-                  {/* Summary Banner */}
-                  {scenarioResult.summary && (
-                    <div className="rounded-xl border border-[#84cc16]/30 bg-[#FAF7F2] p-3 text-xs text-[#18122B] font-medium leading-relaxed">
-                      <span className="font-bold text-[#3f6212] mr-1.5">✦ Impact:</span>
-                      {scenarioResult.summary}
-                    </div>
-                  )}
-
-                  {/* Goals List */}
-                  {scenarioResult.goals && scenarioResult.goals.length > 0 ? (
-                    <div className="space-y-2.5">
-                      {scenarioResult.goals.map((goal: WhatIfGoalProjection) => {
-                        const personality = getGoalPersonality(goal.title);
-                        const deltaBadge = getTimelineDeltaBadge(goal.originalEta, goal.revisedEta, goal.monthsDelta);
-
-                        return (
-                          <div
-                            key={goal.id || goal.title}
-                            className="rounded-xl border border-stone-200 bg-[#FFFDF8] p-3.5 shadow-2xs hover:border-stone-300 transition"
-                          >
-                            <div className="flex items-center justify-between gap-2 mb-2">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-base p-1 rounded-lg bg-stone-100">
-                                  {personality.icon}
+                          {/* Difference Badge */}
+                          {proj.monthsDelta !== null && (
+                            <div>
+                              {proj.monthsDelta > 0 ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 border border-emerald-200 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                                  ✓ {proj.monthsDelta} month{proj.monthsDelta === 1 ? "" : "s"} sooner
                                 </span>
-                                <div>
-                                  <span className="text-[9px] font-bold tracking-wider uppercase text-stone-400">
-                                    {personality.tag}
-                                  </span>
-                                  <h4 className="font-serif text-sm font-bold text-[#18122B] leading-tight">
-                                    {goal.title}
-                                  </h4>
-                                </div>
-                              </div>
-
-                              {deltaBadge && (
-                                <span
-                                  className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold tracking-wider uppercase ${deltaBadge.bg}`}
-                                >
-                                  {deltaBadge.label}
+                              ) : proj.monthsDelta < 0 ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 border border-amber-200 px-2.5 py-0.5 text-[10px] font-bold text-amber-800">
+                                  ⚡ {Math.abs(proj.monthsDelta)} month{Math.abs(proj.monthsDelta) === 1 ? "" : "s"} later
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-stone-200/80 border border-stone-300 px-2 py-0.5 text-[10px] font-bold text-stone-700">
+                                  On track with baseline
                                 </span>
                               )}
                             </div>
+                          )}
+                        </div>
 
-                            {/* Before -> After Timeline Comparison */}
-                            <div className="mt-2.5 grid grid-cols-2 gap-2 rounded-lg bg-[#FAF8F5] p-2.5 border border-[#E5DAC4]/60">
-                              <div>
-                                <span className="text-[10px] font-bold text-stone-400 uppercase">
-                                  CURRENT TIMELINE
-                                </span>
-                                <p className="font-serif text-sm font-bold text-[#18122B] mt-0.5">
-                                  {formatTimeline(goal.originalEta)}
-                                </p>
-                              </div>
-
-                              <div>
-                                <span className="text-[10px] font-bold text-[#3f6212] uppercase flex items-center gap-1">
-                                  <span>WHAT-IF TIMELINE</span>
-                                  <span className="text-[#84cc16]">→</span>
-                                </span>
-                                <p className="font-serif text-sm font-bold text-[#3f6212] mt-0.5">
-                                  {formatTimeline(goal.revisedEta)}
-                                </p>
-                              </div>
-                            </div>
-
-                            {/* Additional metadata tags if available */}
-                            {(goal.onTrack !== undefined || goal.projectedSavings !== undefined) && (
-                              <div className="mt-2 flex items-center gap-2 text-[10px] text-stone-500 font-medium">
-                                {goal.onTrack !== undefined && (
-                                  <span className={goal.onTrack ? "text-emerald-700 font-semibold" : "text-amber-700 font-semibold"}>
-                                    {goal.onTrack ? "✓ On track" : "⚡ Action required"}
-                                  </span>
-                                )}
-                                {goal.projectedSavings !== undefined && (
-                                  <>
-                                    <span>&middot;</span>
-                                    <span>Projected savings: {formatINR(goal.projectedSavings)}</span>
-                                  </>
-                                )}
-                              </div>
-                            )}
+                        {/* Timeline comparison columns */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 rounded-lg bg-white p-3 border border-[#E5DAC4]/60">
+                          <div>
+                            <span className="text-[9px] font-bold text-stone-400 uppercase block">
+                              Target / Saved
+                            </span>
+                            <span className="font-serif text-xs font-bold text-stone-800">
+                              {formatINR(proj.targetAmount)}
+                            </span>
+                            <span className="text-[10px] text-stone-500 block">
+                              ({formatINR(proj.savedAmount)} saved)
+                            </span>
                           </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="py-6 text-center text-xs text-stone-500 font-medium">
-                      No goal comparisons returned for this scenario.
-                    </div>
-                  )}
+
+                          <div>
+                            <span className="text-[9px] font-bold text-stone-400 uppercase block">
+                              Current Path
+                            </span>
+                            <span className="font-serif text-xs font-bold text-stone-700">
+                              {proj.baselineMonths !== null
+                                ? `${proj.baselineMonths} month${proj.baselineMonths === 1 ? "" : "s"}`
+                                : "—"}
+                            </span>
+                          </div>
+
+                          <div className="col-span-2 sm:col-span-1">
+                            <span className="text-[9px] font-bold text-[#3f6212] uppercase block">
+                              Scenario Path
+                            </span>
+                            <span className="font-serif text-xs font-bold text-[#3f6212]">
+                              {proj.projectedMonths !== null
+                                ? `${proj.projectedMonths} month${proj.projectedMonths === 1 ? "" : "s"}`
+                                : "—"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
-            </div>
 
-            {/* Footer note */}
-            <div className="mt-4 pt-3 border-t border-[#E5DAC4]/60 flex items-center justify-between text-[10px] text-stone-400 font-mono">
-              <span>Small change. Different timeline.</span>
-              <span>FinSage AI Model</span>
+              {/* Subtitle footer */}
+              <div className="mt-4 pt-3 border-t border-[#E5DAC4]/60 flex items-center justify-between text-[10px] text-stone-400 font-mono">
+                <span>Small change. Different timeline.</span>
+                <span>FinSage Scenario Engine</span>
+              </div>
             </div>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
