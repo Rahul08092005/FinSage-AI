@@ -2,8 +2,28 @@
 
 import { useEffect, useRef, useState } from "react";
 import { streamAdvisorChat, exportFinancialReport } from "@/lib/api";
+import { formatINR } from "@/lib/formatCurrency";
 import { AdvisorResponseView, StructuredGuruPerspective } from "./AdvisorResponseView";
 import { CitationSourceControl } from "./CitationSourceControl";
+
+export interface MatchingTransaction {
+  id?: string;
+  date?: string;
+  transactionDate?: string;
+  description?: string;
+  merchant?: string;
+  category?: string;
+  amount?: number | string;
+  [key: string]: any;
+}
+
+export interface ReasoningTrace {
+  evidence?: string[] | string;
+  calculation?: string;
+  confidence?: "high" | "medium" | "low" | string;
+  summary?: string;
+  [key: string]: any;
+}
 
 interface Message {
   id: string;
@@ -13,8 +33,9 @@ interface Message {
   mode?: "advisor" | "compare";
   citations?: any[];
   guru_perspectives?: StructuredGuruPerspective[];
+  matching_transactions?: MatchingTransaction[];
+  reasoning_trace?: ReasoningTrace;
 }
-
 
 const ADVISOR_PROMPTS = [
   "How much did I spend on Food this month?",
@@ -29,6 +50,228 @@ const GURU_PROMPTS = [
   "Compare Safe Play vs Balanced Take for my emergency fund",
   "Contrast value investing vs index strategies for my surplus cash",
 ];
+
+const SUGGESTED_QUESTION_CHIPS = [
+  "How much did I spend on food this month?",
+  "Should I pay off debt or invest?",
+  "Where did most of my money go this month?",
+  "Am I overspending anywhere?",
+];
+
+// Helper to format confidence pill colors: high (teal), medium (gold/amber), low (muted grey)
+function getConfidenceBadge(confidence?: string) {
+  const conf = (confidence || "medium").toLowerCase();
+  if (conf === "high") {
+    return {
+      label: "HIGH",
+      bg: "bg-teal-50 border-teal-200 text-teal-800",
+      dot: "bg-teal-600",
+    };
+  }
+  if (conf === "medium") {
+    return {
+      label: "MEDIUM",
+      bg: "bg-amber-50 border-amber-200 text-amber-800",
+      dot: "bg-amber-500",
+    };
+  }
+  return {
+    label: "LOW",
+    bg: "bg-stone-100 border-stone-200 text-stone-600",
+    dot: "bg-stone-400",
+  };
+}
+
+function MatchingTransactionsControl({
+  transactions,
+  messageId,
+}: {
+  transactions?: MatchingTransaction[];
+  messageId: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!transactions || !Array.isArray(transactions) || transactions.length === 0) {
+    return null;
+  }
+
+  const count = transactions.length;
+
+  return (
+    <div className="mt-3 pt-2.5 border-t border-stone-200/70">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-controls={`matching-txs-${messageId}`}
+        className="inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-white hover:bg-stone-50 px-3 py-1 text-xs font-semibold text-stone-700 transition cursor-pointer shadow-2xs"
+      >
+        <span>🧾</span>
+        <span>
+          {expanded ? "Hide" : "View"} {count} matching transaction{count === 1 ? "" : "s"}
+        </span>
+        <span className="text-stone-400 text-[10px]">{expanded ? "▲" : "▼"}</span>
+      </button>
+
+      {expanded && (
+        <div
+          id={`matching-txs-${messageId}`}
+          className="mt-2.5 rounded-xl border border-stone-200/80 bg-white p-3 shadow-2xs max-h-60 overflow-y-auto"
+        >
+          <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-stone-200/60 text-[9px] font-bold uppercase tracking-wider text-stone-400">
+            <span>Date & Description</span>
+            <span>Category / Amount</span>
+          </div>
+
+          <div className="divide-y divide-stone-100 space-y-1">
+            {transactions.map((tx, idx) => {
+              const dateStr = tx.date || tx.transactionDate;
+              const formattedDate = dateStr
+                ? new Date(dateStr).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+                : "—";
+              const desc = tx.description || tx.merchant || "Transaction";
+              const cat = tx.category || "General";
+              const amt =
+                tx.amount !== undefined && tx.amount !== null ? formatINR(tx.amount) : "—";
+
+              return (
+                <div
+                  key={tx.id || idx}
+                  className="pt-1.5 flex items-center justify-between gap-2 text-xs"
+                >
+                  <div className="min-w-0 flex items-center gap-2">
+                    <span className="text-[10px] font-mono text-stone-400 shrink-0">
+                      {formattedDate}
+                    </span>
+                    <span className="font-medium text-[#18122B] truncate">{desc}</span>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded font-medium">
+                      {cat}
+                    </span>
+                    <span className="font-serif font-bold text-[#18122B]">{amt}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReasoningTraceControl({
+  trace,
+  messageId,
+}: {
+  trace?: ReasoningTrace;
+  messageId: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!trace || typeof trace !== "object") {
+    return null;
+  }
+
+  // Verify at least one usable property exists
+  const hasEvidence = Array.isArray(trace.evidence)
+    ? trace.evidence.length > 0
+    : !!trace.evidence;
+  const hasCalc = !!trace.calculation;
+  const hasConf = !!trace.confidence;
+  const hasSummary = !!trace.summary;
+
+  if (!hasEvidence && !hasCalc && !hasConf && !hasSummary) {
+    return null;
+  }
+
+  const confBadge = getConfidenceBadge(trace.confidence);
+  const evidenceList = Array.isArray(trace.evidence)
+    ? trace.evidence
+    : typeof trace.evidence === "string"
+    ? [trace.evidence]
+    : [];
+
+  return (
+    <div className="mt-3 pt-2.5 border-t border-stone-200/70">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-controls={`reasoning-trace-${messageId}`}
+        className="inline-flex items-center gap-1.5 rounded-full border border-[#E5DAC4] bg-[#FFFDF8] hover:bg-stone-50 px-3 py-1 text-xs font-semibold text-[#18122B] transition cursor-pointer shadow-2xs"
+      >
+        <span className="text-[#84cc16] font-bold">✦</span>
+        <span>Why?</span>
+        <span className="text-stone-400 text-[10px]">{expanded ? "▲" : "▼"}</span>
+      </button>
+
+      {expanded && (
+        <div
+          id={`reasoning-trace-${messageId}`}
+          className="mt-2.5 rounded-xl border border-[#E5DAC4] bg-white p-3.5 shadow-2xs space-y-3"
+        >
+          <div className="flex items-center justify-between border-b border-stone-100 pb-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-[#18122B]/70">
+              ✦ SHOW YOUR WORK
+            </span>
+            {hasConf && (
+              <span
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-bold tracking-wider uppercase ${confBadge.bg}`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${confBadge.dot}`} />
+                <span>CONFIDENCE: {confBadge.label}</span>
+              </span>
+            )}
+          </div>
+
+          {/* Evidence section */}
+          {evidenceList.length > 0 && (
+            <div>
+              <span className="text-[9px] font-bold uppercase tracking-wider text-stone-400 block mb-1">
+                EVIDENCE
+              </span>
+              <ul className="space-y-1 text-xs text-stone-700">
+                {evidenceList.map((item, idx) => (
+                  <li key={idx} className="flex items-start gap-1.5">
+                    <span className="text-[#3f6212] font-bold">•</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Calculation section */}
+          {hasCalc && (
+            <div className="pt-2 border-t border-stone-100">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-stone-400 block mb-1">
+                CALCULATION
+              </span>
+              <p className="font-mono text-xs text-[#18122B] bg-[#FAF8F5] p-2 rounded-lg border border-[#E5DAC4]/60">
+                {trace.calculation}
+              </p>
+            </div>
+          )}
+
+          {/* Summary section if provided and distinct */}
+          {hasSummary && !hasCalc && (
+            <div className="pt-2 border-t border-stone-100">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-stone-400 block mb-1">
+                REASONING SUMMARY
+              </span>
+              <p className="text-xs text-stone-700 font-medium leading-relaxed">
+                {trace.summary}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function AdvisorChat({ token }: { token: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -57,7 +300,10 @@ export function AdvisorChat({ token }: { token: string }) {
     setError(null);
     setInput("");
 
-    const currentTimestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const currentTimestamp = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
@@ -81,7 +327,11 @@ export function AdvisorChat({ token }: { token: string }) {
 
     // If in Guru Compare mode and query isn't already explicit, guide context
     let queryToSend = textToSend;
-    if (mode === "compare" && !textToSend.toLowerCase().includes("compare") && !textToSend.toLowerCase().includes("guru")) {
+    if (
+      mode === "compare" &&
+      !textToSend.toLowerCase().includes("compare") &&
+      !textToSend.toLowerCase().includes("guru")
+    ) {
       queryToSend = `Please compare different financial guru perspectives (e.g. Conservative vs Growth vs Balanced): ${textToSend}`;
     }
 
@@ -101,15 +351,15 @@ export function AdvisorChat({ token }: { token: string }) {
       },
       (err) => {
         console.error("[streamAdvisorChat] Error:", err);
-        setError(err.message || "Failed to reach AI Advisor. Please verify the AI service is running.");
+        setError(
+          err.message || "Failed to reach AI Advisor. Please verify the AI service is running."
+        );
         setIsStreaming(false);
       },
       (citations) => {
         if (Array.isArray(citations) && citations.length > 0) {
           setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === advisorMsgId ? { ...msg, citations } : msg
-            )
+            prev.map((msg) => (msg.id === advisorMsgId ? { ...msg, citations } : msg))
           );
         }
       },
@@ -121,10 +371,27 @@ export function AdvisorChat({ token }: { token: string }) {
             )
           );
         }
+      },
+      (matching_transactions) => {
+        if (Array.isArray(matching_transactions) && matching_transactions.length > 0) {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === advisorMsgId ? { ...msg, matching_transactions } : msg
+            )
+          );
+        }
+      },
+      (reasoning_trace) => {
+        if (reasoning_trace) {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === advisorMsgId ? { ...msg, reasoning_trace } : msg
+            )
+          );
+        }
       }
     );
   }
-
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -142,7 +409,10 @@ export function AdvisorChat({ token }: { token: string }) {
       try {
         baseReport = await exportFinancialReport(token);
       } catch (err) {
-        console.warn("[ExportReport] Backend report endpoint unavailable, compiling frontend analysis session:", err);
+        console.warn(
+          "[ExportReport] Backend report endpoint unavailable, compiling frontend analysis session:",
+          err
+        );
       }
 
       // Build conversation memorandum
@@ -160,11 +430,18 @@ export function AdvisorChat({ token }: { token: string }) {
           if (m.role === "user") {
             sessionContent += `### Inquirer Query (${m.timestamp}):\n> ${m.content}\n\n`;
           } else {
-            sessionContent += `### Advisor Memorandum (${m.timestamp}) [Mode: ${m.mode ?? "advisor"}]:\n${m.content}\n\n`;
+            sessionContent += `### Advisor Memorandum (${m.timestamp}) [Mode: ${
+              m.mode ?? "advisor"
+            }]:\n${m.content}\n\n`;
             if (m.citations && m.citations.length > 0) {
               sessionContent += `**Grounded Sources (${m.citations.length}):**\n`;
               m.citations.forEach((c: any, cIdx: number) => {
-                const text = typeof c === "string" ? c : (c.title ? `${c.title}: ${c.content || c.snippet || ""}` : (c.content || c.snippet || JSON.stringify(c)));
+                const text =
+                  typeof c === "string"
+                    ? c
+                    : c.title
+                    ? `${c.title}: ${c.content || c.snippet || ""}`
+                    : c.content || c.snippet || JSON.stringify(c);
                 sessionContent += `- [Source ${cIdx + 1}] ${text.slice(0, 160)}...\n`;
               });
               sessionContent += `\n`;
@@ -176,14 +453,19 @@ export function AdvisorChat({ token }: { token: string }) {
         sessionContent += `*No active conversation queries recorded in this session.*\n\n`;
       }
 
-      const finalMarkdown = baseReport ? `${baseReport}\n${sessionContent}` : `# FinSage AI Financial Advisory Report\n${sessionContent}`;
+      const finalMarkdown = baseReport
+        ? `${baseReport}\n${sessionContent}`
+        : `# FinSage AI Financial Advisory Report\n${sessionContent}`;
 
       // Trigger client-side file download
       const blob = new Blob([finalMarkdown], { type: "text/markdown;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `FinSage-Financial-Advisory-Report-${new Date().toISOString().slice(0, 10)}.md`);
+      link.setAttribute(
+        "download",
+        `FinSage-Financial-Advisory-Report-${new Date().toISOString().slice(0, 10)}.md`
+      );
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -211,7 +493,11 @@ export function AdvisorChat({ token }: { token: string }) {
               ✦ RAG GROUNDED
             </span>
             <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-stone-400 uppercase">
-              <span className={`h-1.5 w-1.5 rounded-full ${isStreaming ? "bg-amber-500 animate-ping" : "bg-emerald-500"}`} />
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  isStreaming ? "bg-amber-500 animate-ping" : "bg-emerald-500"
+                }`}
+              />
               {isStreaming ? "Formulating response…" : "Engine Ready"}
             </span>
             {exportMessage && (
@@ -280,11 +566,11 @@ export function AdvisorChat({ token }: { token: string }) {
         </div>
       </div>
 
-      {/* 2. CONTEXTUAL PROMPT SUGGESTIONS */}
+      {/* 2. CONTEXTUAL PROMPT SUGGESTIONS (TOP) */}
       <div className="border-b border-stone-200/70 bg-[#FFFDF8] px-5 py-2">
         <div className="flex items-center gap-1.5 overflow-x-auto text-xs py-0.5">
           <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-stone-400 mr-1">
-            {mode === "compare" ? "✦ Guru Inquiries:" : "✦ Suggested Inquiries:"}
+            {mode === "compare" ? "✦ Guru Inquiries:" : "✦ Contextual Inquiries:"}
           </span>
           {activePresets.map((prompt, idx) => (
             <button
@@ -388,9 +674,20 @@ export function AdvisorChat({ token }: { token: string }) {
                       guru_perspectives={msg.guru_perspectives}
                     />
 
-
                     {/* Grounded Evidence / Citation Source Control */}
                     <CitationSourceControl citations={msg.citations} />
+
+                    {/* Step 1: Matching Transactions Expandable Toggle */}
+                    <MatchingTransactionsControl
+                      transactions={msg.matching_transactions}
+                      messageId={msg.id}
+                    />
+
+                    {/* Step 2: "Why?" Reasoning Expandable Toggle */}
+                    <ReasoningTraceControl
+                      trace={msg.reasoning_trace}
+                      messageId={msg.id}
+                    />
                   </div>
                 ) : (
                   <p className="whitespace-pre-wrap">{msg.content}</p>
@@ -410,8 +707,31 @@ export function AdvisorChat({ token }: { token: string }) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 4. COMPOSER INPUT BAR */}
-      <div className="border-t border-stone-200/80 bg-[#FAF7F2] p-3 sm:p-4">
+      {/* 4. SUGGESTED QUESTION CHIPS ABOVE CHAT INPUT */}
+      <div className="border-t border-stone-200/80 bg-[#FAF7F2] px-4 pt-2.5 pb-1">
+        <div className="flex items-center gap-1.5 overflow-x-auto text-xs py-0.5">
+          <span className="shrink-0 text-[10px] font-black uppercase tracking-wider text-[#18122B]/70 mr-1">
+            TRY ASKING ✦
+          </span>
+          {SUGGESTED_QUESTION_CHIPS.map((chip, idx) => (
+            <button
+              key={idx}
+              type="button"
+              disabled={isStreaming}
+              onClick={() => {
+                setInput(chip);
+                inputRef.current?.focus();
+              }}
+              className="shrink-0 rounded-full border border-stone-300 bg-white hover:bg-stone-50 px-2.5 py-1 text-[11px] font-medium text-stone-700 transition hover:border-[#18122B] hover:text-[#18122B] disabled:opacity-40 cursor-pointer shadow-2xs active:scale-95"
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 5. COMPOSER INPUT BAR */}
+      <div className="bg-[#FAF7F2] px-3 pb-3 sm:px-4 sm:pb-4">
         <form
           onSubmit={(e) => {
             e.preventDefault();

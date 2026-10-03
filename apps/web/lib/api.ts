@@ -263,7 +263,9 @@ export async function streamAdvisorChat(
   onDone: () => void,
   onError: (err: any) => void,
   onCitations?: (citations: any[]) => void,
-  onGuruPerspectives?: (perspectives: any[]) => void
+  onGuruPerspectives?: (perspectives: any[]) => void,
+  onMatchingTransactions?: (transactions: any[]) => void,
+  onReasoningTrace?: (trace: any) => void
 ) {
   try {
     const res = await fetch(`${BFF_URL}/api/v1/advisor/chat`, {
@@ -289,6 +291,14 @@ export async function streamAdvisorChat(
       }
       if (Array.isArray(data.guru_perspectives) && data.guru_perspectives.length > 0) {
         onGuruPerspectives?.(data.guru_perspectives);
+      }
+      const matchTxs = data.matching_transactions || data.matchingTransactions;
+      if (Array.isArray(matchTxs) && matchTxs.length > 0) {
+        onMatchingTransactions?.(matchTxs);
+      }
+      const rTrace = data.reasoning_trace || data.reasoningTrace;
+      if (rTrace && (typeof rTrace === "object" || typeof rTrace === "string")) {
+        onReasoningTrace?.(rTrace);
       }
       onDone();
       return;
@@ -348,7 +358,35 @@ export async function streamAdvisorChat(
           continue;
         }
 
-        // Check for JSON object chunk with citations or guru_perspectives
+        // Check for matching_transactions payload
+        if (payload.startsWith("[MATCHING_TRANSACTIONS]")) {
+          try {
+            const raw = payload.slice(23).trim();
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              onMatchingTransactions?.(parsed);
+            }
+          } catch (e) {
+            console.warn("[streamAdvisorChat] Failed to parse matching_transactions:", e);
+          }
+          continue;
+        }
+
+        // Check for reasoning_trace payload
+        if (payload.startsWith("[REASONING_TRACE]")) {
+          try {
+            const raw = payload.slice(17).trim();
+            const parsed = JSON.parse(raw);
+            if (parsed) {
+              onReasoningTrace?.(parsed);
+            }
+          } catch (e) {
+            console.warn("[streamAdvisorChat] Failed to parse reasoning_trace:", e);
+          }
+          continue;
+        }
+
+        // Check for JSON object chunk with metadata
         if (payload.trim().startsWith("{") && payload.trim().endsWith("}")) {
           try {
             const parsed = JSON.parse(payload.trim());
@@ -357,6 +395,14 @@ export async function streamAdvisorChat(
             }
             if (Array.isArray(parsed.guru_perspectives) && parsed.guru_perspectives.length > 0) {
               onGuruPerspectives?.(parsed.guru_perspectives);
+            }
+            const matchTxs = parsed.matching_transactions || parsed.matchingTransactions;
+            if (Array.isArray(matchTxs) && matchTxs.length > 0) {
+              onMatchingTransactions?.(matchTxs);
+            }
+            const rTrace = parsed.reasoning_trace || parsed.reasoningTrace;
+            if (rTrace && (typeof rTrace === "object" || typeof rTrace === "string")) {
+              onReasoningTrace?.(rTrace);
             }
             if (parsed.token !== undefined && parsed.token !== null) {
               onChunk(String(parsed.token));
