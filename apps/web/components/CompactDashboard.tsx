@@ -66,6 +66,10 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
   const [expenseChangePct, setExpenseChangePct] = useState<number>(-20); // -20% default
   const [savingsDelta, setSavingsDelta] = useState<number>(5000); // +5000 default
 
+  const [trendTimeframe, setTrendTimeframe] = useState<"3M" | "6M" | "12M">("3M");
+  const [hoveredTrendIdx, setHoveredTrendIdx] = useState<number | null>(null);
+  const [showTrendDropdown, setShowTrendDropdown] = useState(false);
+
   // Load all dashboard data
   const loadDashboardData = useCallback(async () => {
     setLoading(true);
@@ -74,6 +78,7 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
       const currentYear = now.getFullYear();
       const currentMonth = String(now.getMonth() + 1).padStart(2, "0");
       const currentMonthStr = `${currentYear}-${currentMonth}`;
+      const count = trendTimeframe === "12M" ? 12 : trendTimeframe === "6M" ? 6 : 3;
 
       const [
         meRes,
@@ -87,7 +92,7 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
       ] = await Promise.allSettled([
         getMe(token),
         getExpenseSummary(token, currentMonthStr),
-        getSpendingTrend(token),
+        getSpendingTrend(token, count),
         getInsights(token),
         getMissions(token),
         getProgress(token),
@@ -133,11 +138,23 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, trendTimeframe]);
 
   useEffect(() => {
     loadDashboardData();
   }, [loadDashboardData]);
+
+  // Handle timeframe change for Spending Rhythm
+  function handleTimeframeChange(tf: "3M" | "6M" | "12M") {
+    setTrendTimeframe(tf);
+    setShowTrendDropdown(false);
+    const count = tf === "12M" ? 12 : tf === "6M" ? 6 : 3;
+    getSpendingTrend(token, count)
+      .then((data) => {
+        if (Array.isArray(data)) setTrend(data);
+      })
+      .catch((e) => console.warn("[CompactDashboard] Error updating spending trend:", e));
+  }
 
   // Handle manual insights refresh
   async function handleRefreshInsights() {
@@ -214,46 +231,81 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
     ];
   }, [categories]);
 
-  // 3-Month Trend Dynamics for Spending Rhythm
-  const threeMonthTrend = useMemo(() => {
+  // Spending Rhythm dynamics and trend data
+  const trendData = useMemo(() => {
     const monthShorts = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const now = new Date();
     const currM = now.getMonth();
+    const count = trendTimeframe === "12M" ? 12 : trendTimeframe === "6M" ? 6 : 3;
 
-    // Default 3 months ending with current month
-    const defaultMonths = [
-      { month: monthShorts[(currM - 2 + 12) % 12], total: 0 },
-      { month: monthShorts[(currM - 1 + 12) % 12], total: 0 },
-      { month: monthShorts[currM], total: moneyOut },
-    ];
-
-    if (trend.length >= 3) {
-      return trend.slice(-3).map((t) => {
-        const parts = t.month.split("-");
-        const mIdx = parts.length === 2 ? parseInt(parts[1], 10) - 1 : currM;
+    if (trend && trend.length > 0) {
+      return trend.map((t) => {
+        let label = t.month;
+        if (t.month && t.month.includes("-")) {
+          const parts = t.month.split("-");
+          const m = parseInt(parts[1], 10) - 1;
+          label = monthShorts[m] || t.month;
+        }
         return {
-          month: monthShorts[mIdx] || t.month,
+          month: label,
+          rawMonth: t.rawMonth,
+          year: t.year,
           total: Number(t.total) || 0,
+          byCategory: t.byCategory || [],
         };
       });
     }
 
-    if (trend.length > 0) {
-      const mapped = trend.map((t) => {
-        const parts = t.month.split("-");
-        const mIdx = parts.length === 2 ? parseInt(parts[1], 10) - 1 : currM;
-        return {
-          month: monthShorts[mIdx] || t.month,
-          total: Number(t.total) || 0,
-        };
+    // Default months ending with current month
+    const fallback = [];
+    for (let i = count - 1; i >= 0; i--) {
+      const idx = (currM - i + 120) % 12;
+      fallback.push({
+        month: monthShorts[idx],
+        total: i === 0 ? moneyOut : 0,
+        byCategory: [],
       });
-      return [...defaultMonths.slice(0, 3 - mapped.length), ...mapped];
     }
+    return fallback;
+  }, [trend, trendTimeframe, moneyOut]);
 
-    return defaultMonths;
-  }, [trend, moneyOut]);
+  const maxTrendVal = Math.max(...trendData.map((t) => t.total), 100);
 
-  const maxTrendVal = Math.max(...threeMonthTrend.map((t) => t.total), 1000);
+  // Dynamic Spending Rhythm badge
+  const rhythmStatus = useMemo(() => {
+    if (trend.length >= 2) {
+      const curr = Number(trend[trend.length - 1]?.total) || 0;
+      const prev = Number(trend[trend.length - 2]?.total) || 0;
+      if (prev > 0) {
+        const diff = Math.round(((curr - prev) / prev) * 100);
+        if (diff < 0) {
+          return {
+            text: `trending down ↙ ${Math.abs(diff)}%`,
+            badgeClass: "text-emerald-800 bg-emerald-50 border-emerald-200",
+          };
+        } else if (diff > 0) {
+          return {
+            text: `trending up ↗ +${diff}%`,
+            badgeClass: "text-rose-800 bg-rose-50 border-rose-200",
+          };
+        } else {
+          return {
+            text: "steady ↔ 0%",
+            badgeClass: "text-stone-700 bg-stone-50 border-stone-200",
+          };
+        }
+      } else if (curr > 0) {
+        return {
+          text: `active ↗ ${formatINR(curr)}`,
+          badgeClass: "text-amber-800 bg-amber-50 border-amber-200",
+        };
+      }
+    }
+    return {
+      text: "steady —",
+      badgeClass: "text-stone-700 bg-stone-50 border-stone-200",
+    };
+  }, [trend]);
 
   // Active missions
   const activeMissions = useMemo(() => {
@@ -547,35 +599,95 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
                   Spending Rhythm
                 </h2>
               </div>
-              <span className="rounded-lg border border-[#DDD9CF] bg-white px-2 py-0.5 text-[10px] font-bold text-[#18122B]/70">
-                Quarterly ▾
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className={`hidden sm:inline font-serif text-[10px] italic font-bold border px-2 py-0.5 rounded-full ${rhythmStatus.badgeClass}`}>
+                  {rhythmStatus.text}
+                </span>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowTrendDropdown(!showTrendDropdown)}
+                    className="flex items-center gap-1 rounded-lg border border-[#DDD9CF] bg-white px-2 py-0.5 text-[10px] font-bold text-[#18122B]/80 hover:bg-[#FAF6ED] transition cursor-pointer"
+                  >
+                    <span>{trendTimeframe === "3M" ? "Quarterly" : trendTimeframe === "6M" ? "Half-Year" : "Yearly"}</span>
+                    <span className="text-[8px]">▾</span>
+                  </button>
+                  {showTrendDropdown && (
+                    <div className="absolute right-0 mt-1 w-28 rounded-xl border border-[#E5DAC4] bg-[#FFFDF8] p-1 shadow-lg z-20">
+                      <button
+                        type="button"
+                        onClick={() => handleTimeframeChange("3M")}
+                        className={`w-full text-left px-2 py-1 text-[11px] font-semibold rounded-md transition ${
+                          trendTimeframe === "3M" ? "bg-[#18122B] text-white font-bold" : "text-[#18122B]/80 hover:bg-[#FAF6ED]"
+                        }`}
+                      >
+                        Quarterly (3M)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleTimeframeChange("6M")}
+                        className={`w-full text-left px-2 py-1 text-[11px] font-semibold rounded-md transition ${
+                          trendTimeframe === "6M" ? "bg-[#18122B] text-white font-bold" : "text-[#18122B]/80 hover:bg-[#FAF6ED]"
+                        }`}
+                      >
+                        6 Months
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleTimeframeChange("12M")}
+                        className={`w-full text-left px-2 py-1 text-[11px] font-semibold rounded-md transition ${
+                          trendTimeframe === "12M" ? "bg-[#18122B] text-white font-bold" : "text-[#18122B]/80 hover:bg-[#FAF6ED]"
+                        }`}
+                      >
+                        1 Year (12M)
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
             <p className="text-[11px] text-[#18122B]/55 font-medium mt-0.5">
-              Last 3 months dynamics
+              {trendTimeframe === "3M" ? "Last 3 months dynamics" : trendTimeframe === "6M" ? "Last 6 months dynamics" : "Last 12 months dynamics"}
             </p>
 
-            {/* Doodle Sticker */}
-            <div className="absolute right-4 top-16 hidden sm:flex flex-col items-end pointer-events-none">
-              <span className="font-serif text-[11px] italic font-bold text-[#18122B]/80 -rotate-6">
-                trending down, nice! ↙
-              </span>
-            </div>
+            {/* Vertical Bar Chart */}
+            <div className="mt-4 flex items-end justify-center gap-2 sm:gap-4 h-36 pb-1 relative">
+              {trendData.map((t, idx) => {
+                const heightPct = maxTrendVal > 0 ? Math.max(10, Math.round((t.total / maxTrendVal) * 100)) : 12;
+                const isCurrent = idx === trendData.length - 1;
+                const isHovered = hoveredTrendIdx === idx;
+                const topCategory = t.byCategory && t.byCategory.length > 0
+                  ? [...t.byCategory].sort((a, b) => Number(b.total) - Number(a.total))[0]
+                  : null;
 
-            {/* Vertical 3-Month Bar Chart */}
-            <div className="mt-6 flex items-end justify-center gap-8 h-40 pb-2">
-              {threeMonthTrend.map((t, idx) => {
-                const heightPct = maxTrendVal > 0 ? Math.max(12, Math.round((t.total / maxTrendVal) * 100)) : 15;
-                const isCurrent = idx === threeMonthTrend.length - 1;
                 return (
-                  <div key={idx} className="flex flex-col items-center gap-1.5 flex-1 max-w-[60px]">
-                    <span className="font-mono text-[10px] font-bold text-[#18122B] text-center whitespace-nowrap">
+                  <div
+                    key={idx}
+                    onMouseEnter={() => setHoveredTrendIdx(idx)}
+                    onMouseLeave={() => setHoveredTrendIdx(null)}
+                    className="relative flex flex-col items-center gap-1.5 flex-1 max-w-[64px] group cursor-pointer"
+                  >
+                    {/* Hover detail tooltip */}
+                    {isHovered && (
+                      <div className="absolute -top-12 z-30 whitespace-nowrap rounded-lg border border-[#DDD9CF] bg-[#18122B] px-2 py-1 text-[10px] text-white shadow-md pointer-events-none">
+                        <p className="font-bold">{t.month}: {formatINR(t.total)}</p>
+                        {topCategory && (
+                          <p className="text-[9px] text-[#E5DAC4]">Top: {topCategory.category} ({formatINR(topCategory.total)})</p>
+                        )}
+                      </div>
+                    )}
+
+                    <span className={`font-mono text-[10px] font-bold text-center whitespace-nowrap transition ${
+                      isCurrent || isHovered ? "text-[#18122B]" : "text-[#18122B]/70"
+                    }`}>
                       {formatINR(t.total)}
                     </span>
-                    <div className="w-full flex items-end justify-center h-28">
+                    <div className="w-full flex items-end justify-center h-24">
                       <div
-                        className={`w-full rounded-t-lg transition-all duration-500 ${
-                          isCurrent
+                        className={`w-full rounded-t-lg transition-all duration-300 ${
+                          isHovered
+                            ? "bg-emerald-600 ring-2 ring-emerald-400"
+                            : isCurrent
                             ? "bg-[#18122B]"
                             : t.total > 0
                             ? "bg-[#84cc16]"
@@ -584,7 +696,9 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
                         style={{ height: `${heightPct}%` }}
                       />
                     </div>
-                    <span className="text-[11px] font-bold text-[#18122B]/70">
+                    <span className={`text-[11px] font-bold uppercase tracking-wide transition ${
+                      isCurrent || isHovered ? "text-[#18122B]" : "text-[#18122B]/60"
+                    }`}>
                       {t.month}
                     </span>
                   </div>

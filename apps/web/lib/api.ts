@@ -485,20 +485,24 @@ export async function getExpenseSummary(token: string, monthStr?: string) {
 
 export interface TrendItem {
   month: string;
+  rawMonth?: string;
+  year?: number;
   total: number;
   byCategory?: Array<{ category: string; total: number; count: number }>;
 }
 
-export async function getSpendingTrend(token: string): Promise<TrendItem[]> {
+export async function getSpendingTrend(token: string, count = 3): Promise<TrendItem[]> {
   const months: string[] = [];
   const monthLabels: string[] = [];
+  const years: number[] = [];
   const now = new Date();
 
-  for (let i = 2; i >= 0; i--) {
+  for (let i = count - 1; i >= 0; i--) {
     const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
     const year = d.getUTCFullYear();
     const month = String(d.getUTCMonth() + 1).padStart(2, "0");
     months.push(`${year}-${month}`);
+    years.push(year);
     monthLabels.push(d.toLocaleString("en-US", { month: "short", timeZone: "UTC" }));
   }
 
@@ -509,15 +513,17 @@ export async function getSpendingTrend(token: string): Promise<TrendItem[]> {
           headers: authHeaders(token),
           cache: "no-store",
         });
-        if (!res.ok) return { month: monthLabels[idx], total: 0, byCategory: [] };
+        if (!res.ok) return { month: monthLabels[idx], rawMonth: m, year: years[idx], total: 0, byCategory: [] };
         const data = await res.json();
         return {
           month: monthLabels[idx],
+          rawMonth: m,
+          year: years[idx],
           total: Number(data.total) || 0,
           byCategory: data.byCategory || [],
         };
       } catch {
-        return { month: monthLabels[idx], total: 0, byCategory: [] };
+        return { month: monthLabels[idx], rawMonth: m, year: years[idx], total: 0, byCategory: [] };
       }
     })
   );
