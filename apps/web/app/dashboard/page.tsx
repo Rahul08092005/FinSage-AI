@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { OverviewCards } from "@/components/OverviewCards";
-import { ExportReportButton } from "@/components/ExportReportButton";
 import { getHealth } from "@/lib/api";
 
 export default function DashboardPage() {
@@ -24,32 +22,8 @@ export default function DashboardPage() {
 
   return (
     <AppShell hideHeader={true}>
-      <div className="flex flex-col gap-2.5 sm:gap-3">
-        {/* Compact Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-1 pb-0.5">
-          <div>
-            <h1 className="font-serif text-xl sm:text-2xl lg:text-3xl font-black tracking-tight text-[#18122B] leading-tight">
-              YOUR MONEY, AT A GLANCE.
-            </h1>
-            <p className="text-xs text-[#18122B]/60 font-medium">
-              Everything important, in one place.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <ExportReportButton />
-
-            <Link
-              href="/transactions"
-              className="group inline-flex items-center gap-1.5 rounded-full bg-[#18122B] px-3.5 py-1.5 text-xs font-bold text-white shadow-sm transition-all hover:bg-[#2e234c] hover:scale-105 active:scale-95 shrink-0"
-            >
-              <span>+ Record Transaction</span>
-              <span className="transition-transform group-hover:translate-x-0.5">&rarr;</span>
-            </Link>
-          </div>
-        </div>
-
-        {/* Essential Core: Snapshot, AI Assistant Bar, Main Analytics */}
+      <div className="flex flex-col gap-3 sm:gap-3.5">
+        {/* Compact Recomposed Dashboard */}
         <OverviewCards />
 
         {/* Compact System Status Strip (Bottom, ~28px) */}

@@ -110,12 +110,23 @@ export function Navbar() {
         <div className="flex items-center gap-3">
           {token ? (
             <div className="flex items-center gap-3">
-              {/* Understated Progress Pill */}
+              {/* Understated Progress Pill matching reference */}
               {progress && (
-                <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-[#E5DAC4] bg-[#FAF8F5] px-2.5 py-1 text-[11px] font-bold text-[#18122B] shadow-3xs" title={`${progress.xp} / ${progress.nextLevelXp} XP`}>
-                  <span className="text-[#3f6212] font-black">LVL {progress.level}</span>
-                  <span className="text-stone-300">&middot;</span>
-                  <span className="font-mono text-stone-600 text-[10px]">{progress.xp} XP</span>
+                <div className="hidden sm:flex items-center gap-2 rounded-full border border-[#DDD9CF] bg-white px-2.5 py-1 text-[11px] font-bold text-[#18122B] shadow-2xs">
+                  <div className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-[#84cc16] text-[10px] font-black text-[#18122B]">
+                    {progress.level}
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-mono text-[10px] text-[#18122B]/80 font-bold leading-none">
+                      {progress.xp} / {progress.nextLevelXp} XP
+                    </span>
+                    <div className="h-1 w-16 overflow-hidden rounded-full bg-[#E5DAC4]/60">
+                      <div
+                        className="h-full bg-[#84cc16] transition-all duration-300"
+                        style={{ width: `${Math.min(100, Math.round((progress.xp / progress.nextLevelXp) * 100))}%` }}
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
 

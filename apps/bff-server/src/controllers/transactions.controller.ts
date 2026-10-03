@@ -114,9 +114,6 @@ export async function deleteTransaction(req: AuthedRequest, res: Response) {
   res.status(204).send();
 }
 
-const AI_ENGINE_BASE = process.env.AI_ENGINE_URL || "http://localhost:8000";
-const SMS_CONFIDENCE_THRESHOLD = 0.5;
-
 export async function parseSms(req: AuthedRequest, res: Response) {
   const smsText = (req.body.smsText ?? req.body.sms_text ?? "").trim();
   if (!smsText) {
