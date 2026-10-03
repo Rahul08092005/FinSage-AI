@@ -4,16 +4,23 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { getProgress, UserProgress } from "@/lib/api";
+
 export function Navbar() {
   const [token, setToken] = useState<string | null>(null);
+  const [progress, setProgress] = useState<UserProgress | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const pathname = usePathname();
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      setToken(localStorage.getItem("finsage_token"));
+      const storedToken = localStorage.getItem("finsage_token");
+      setToken(storedToken);
+      if (storedToken) {
+        getProgress(storedToken).then((p) => setProgress(p)).catch(() => {});
+      }
     }
-  }, []);
+  }, [pathname]);
 
   function handleLogout() {
     localStorage.removeItem("finsage_token");
@@ -29,7 +36,8 @@ export function Navbar() {
     pathname?.startsWith("/advisor") ||
     pathname?.startsWith("/financial-plan") ||
     pathname?.startsWith("/what-if") ||
-    pathname?.startsWith("/experiments");
+    pathname?.startsWith("/experiments") ||
+    pathname?.startsWith("/household");
 
   const navLinks = [
     { href: "/dashboard", label: "Dashboard" },
@@ -38,6 +46,7 @@ export function Navbar() {
     { href: "/goals", label: "Goals" },
     { href: "/what-if", label: "What-If" },
     { href: "/experiments", label: "Experiments" },
+    { href: "/household", label: "Household" },
     { href: "/documents", label: "Documents" },
     { href: "/advisor", label: "AI Advisor", isAi: true },
     { href: "/financial-plan", label: "Financial Plan" },
@@ -101,6 +110,15 @@ export function Navbar() {
         <div className="flex items-center gap-3">
           {token ? (
             <div className="flex items-center gap-3">
+              {/* Understated Progress Pill */}
+              {progress && (
+                <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-[#E5DAC4] bg-[#FAF8F5] px-2.5 py-1 text-[11px] font-bold text-[#18122B] shadow-3xs" title={`${progress.xp} / ${progress.nextLevelXp} XP`}>
+                  <span className="text-[#3f6212] font-black">LVL {progress.level}</span>
+                  <span className="text-stone-300">&middot;</span>
+                  <span className="font-mono text-stone-600 text-[10px]">{progress.xp} XP</span>
+                </div>
+              )}
+
               {/* User indicator chip */}
               <div className="hidden sm:flex items-center gap-2 rounded-full border border-[#DDD9CF] bg-white px-3 py-1 text-xs font-semibold text-[#18122B]">
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#18122B] text-[10px] font-bold text-white">

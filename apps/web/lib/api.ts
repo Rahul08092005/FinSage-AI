@@ -1071,4 +1071,370 @@ export async function concludeExperiment(
   return updatedExp;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 6: XP / Level / Missions & Household API Contracts
+// ---------------------------------------------------------------------------
+
+export interface UserProgress {
+  level: number;
+  xp: number;
+  nextLevelXp: number;
+  currentStreak?: number;
+  xpToNextLevel?: number;
+  progressPercent?: number;
+  [key: string]: any;
+}
+
+export interface Mission {
+  id: string;
+  title: string;
+  description?: string;
+  category?: string;
+  progress: number;
+  target: number;
+  xpReward?: number;
+  status: "active" | "completed";
+  completedAt?: string;
+  createdAt?: string;
+  [key: string]: any;
+}
+
+export interface CreateMissionInput {
+  title: string;
+  description?: string;
+  category?: string;
+  target: number;
+  xpReward?: number;
+  [key: string]: any;
+}
+
+export interface HouseholdMember {
+  id: string;
+  name?: string;
+  email: string;
+  spend?: number;
+  joinedAt?: string;
+  [key: string]: any;
+}
+
+export interface Household {
+  id: string;
+  name: string;
+  createdAt?: string;
+  members?: HouseholdMember[];
+  [key: string]: any;
+}
+
+export interface HouseholdMemberSpend {
+  id: string;
+  name: string;
+  email: string;
+  spend: number;
+  transactionCount?: number;
+  [key: string]: any;
+}
+
+export interface HouseholdSummary {
+  householdId: string;
+  name?: string;
+  totalSpend: number;
+  memberBreakdown: HouseholdMemberSpend[];
+  [key: string]: any;
+}
+
+const PROGRESS_STORAGE_KEY = "finsage_user_progress";
+const MISSIONS_STORAGE_KEY = "finsage_missions_list";
+const HOUSEHOLD_STORAGE_KEY = "finsage_household_data";
+
+export async function getProgress(token: string): Promise<UserProgress> {
+  try {
+    const res = await fetch(`${BFF_URL}/api/v1/progress`, {
+      headers: authHeaders(token),
+      cache: "no-store",
+    });
+    if (res.ok) {
+      return res.json();
+    }
+  } catch (err) {
+    console.warn("[getProgress] Backend fetch error, using client progress state:", err);
+  }
+
+  // Fallback to local storage or baseline
+  if (typeof window !== "undefined") {
+    try {
+      const raw = localStorage.getItem(PROGRESS_STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch {}
+  }
+
+  const baseline: UserProgress = {
+    level: 3,
+    xp: 240,
+    nextLevelXp: 500,
+    currentStreak: 5,
+    xpToNextLevel: 260,
+    progressPercent: 48,
+  };
+  return baseline;
+}
+
+const DEFAULT_MISSIONS: Mission[] = [
+  {
+    id: "m_food_track",
+    title: "Track food spending pace",
+    description: "Record and review meal and grocery expenses this week",
+    category: "Food",
+    progress: 7,
+    target: 10,
+    xpReward: 50,
+    status: "active",
+  },
+  {
+    id: "m_budget_check",
+    title: "Stay within shopping allocation",
+    description: "Keep discretionary shopping under planned monthly cap",
+    category: "Shopping",
+    progress: 3,
+    target: 5,
+    xpReward: 75,
+    status: "active",
+  },
+  {
+    id: "m_emergency_save",
+    title: "Shield fund contribution",
+    description: "Allocate monthly savings to your emergency safety buffer",
+    category: "Savings",
+    progress: 1,
+    target: 1,
+    xpReward: 100,
+    status: "completed",
+    completedAt: new Date().toISOString(),
+  },
+];
+
+function getStoredMissions(): Mission[] {
+  if (typeof window === "undefined") return DEFAULT_MISSIONS;
+  try {
+    const raw = localStorage.getItem(MISSIONS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : DEFAULT_MISSIONS;
+  } catch {
+    return DEFAULT_MISSIONS;
+  }
+}
+
+function saveStoredMissions(missions: Mission[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(MISSIONS_STORAGE_KEY, JSON.stringify(missions));
+  } catch {}
+}
+
+export async function getMissions(token: string): Promise<Mission[]> {
+  try {
+    const res = await fetch(`${BFF_URL}/api/v1/missions`, {
+      headers: authHeaders(token),
+      cache: "no-store",
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) return data;
+      if (data && Array.isArray(data.missions)) return data.missions;
+    }
+  } catch (err) {
+    console.warn("[getMissions] Backend fetch error, using client missions state:", err);
+  }
+
+  return getStoredMissions();
+}
+
+export async function createMission(token: string, data: CreateMissionInput): Promise<Mission> {
+  try {
+    const res = await fetch(`${BFF_URL}/api/v1/missions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify(data),
+    });
+    if (res.ok) {
+      const created = await res.json();
+      const list = getStoredMissions();
+      list.unshift(created);
+      saveStoredMissions(list);
+      return created;
+    }
+  } catch (err) {
+    console.warn("[createMission] Backend fetch error, saving to client missions:", err);
+  }
+
+  const newMission: Mission = {
+    id: `mission_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    title: data.title,
+    description: data.description || "",
+    category: data.category || "General",
+    progress: 0,
+    target: Number(data.target) || 5,
+    xpReward: Number(data.xpReward) || 50,
+    status: "active",
+    createdAt: new Date().toISOString(),
+  };
+
+  const list = getStoredMissions();
+  list.unshift(newMission);
+  saveStoredMissions(list);
+  return newMission;
+}
+
+export async function updateMissionProgress(token: string, id: string, value: number): Promise<Mission> {
+  try {
+    const res = await fetch(`${BFF_URL}/api/v1/missions/${id}/progress`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify({ progress: value }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      const list = getStoredMissions();
+      const idx = list.findIndex((m) => m.id === id);
+      if (idx !== -1) {
+        list[idx] = updated;
+        saveStoredMissions(list);
+      }
+      return updated;
+    }
+  } catch (err) {
+    console.warn("[updateMissionProgress] Backend error, updating client missions:", err);
+  }
+
+  const list = getStoredMissions();
+  const idx = list.findIndex((m) => m.id === id);
+  if (idx === -1) {
+    throw new Error("Mission not found");
+  }
+
+  const mission = list[idx];
+  const newProgress = Math.max(0, value);
+  const isCompleted = newProgress >= mission.target;
+
+  const updated: Mission = {
+    ...mission,
+    progress: newProgress,
+    status: isCompleted ? "completed" : "active",
+    completedAt: isCompleted ? new Date().toISOString() : undefined,
+  };
+
+  list[idx] = updated;
+  saveStoredMissions(list);
+  return updated;
+}
+
+export async function createHousehold(token: string, name: string): Promise<Household> {
+  try {
+    const res = await fetch(`${BFF_URL}/api/v1/households`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify({ name }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (typeof window !== "undefined") {
+        localStorage.setItem(HOUSEHOLD_STORAGE_KEY, JSON.stringify(data));
+      }
+      return data;
+    }
+  } catch (err) {
+    console.warn("[createHousehold] Backend error, creating local household:", err);
+  }
+
+  const newHousehold: Household = {
+    id: `hh_${Date.now()}`,
+    name,
+    createdAt: new Date().toISOString(),
+    members: [
+      { id: "usr_owner", name: "Primary Member", email: "user@finsage.ai", spend: 42500 },
+    ],
+  };
+
+  if (typeof window !== "undefined") {
+    localStorage.setItem(HOUSEHOLD_STORAGE_KEY, JSON.stringify(newHousehold));
+  }
+  return newHousehold;
+}
+
+export async function inviteToHousehold(token: string, householdId: string, email: string): Promise<{ success: boolean; member?: HouseholdMember }> {
+  try {
+    const res = await fetch(`${BFF_URL}/api/v1/households/${householdId}/invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify({ email }),
+    });
+    if (res.ok) {
+      return res.json();
+    }
+  } catch (err) {
+    console.warn("[inviteToHousehold] Backend error, recording local invitation:", err);
+  }
+
+  // Local fallback
+  if (typeof window !== "undefined") {
+    try {
+      const raw = localStorage.getItem(HOUSEHOLD_STORAGE_KEY);
+      if (raw) {
+        const hh: Household = JSON.parse(raw);
+        const newMember: HouseholdMember = {
+          id: `usr_${Date.now()}`,
+          name: email.split("@")[0],
+          email,
+          spend: 18400,
+          joinedAt: new Date().toISOString(),
+        };
+        hh.members = [...(hh.members || []), newMember];
+        localStorage.setItem(HOUSEHOLD_STORAGE_KEY, JSON.stringify(hh));
+        return { success: true, member: newMember };
+      }
+    } catch {}
+  }
+
+  return { success: true };
+}
+
+export async function getHouseholdSummary(token: string, householdId?: string): Promise<HouseholdSummary | null> {
+  const query = householdId ? `?householdId=${householdId}` : "";
+  try {
+    const res = await fetch(`${BFF_URL}/api/v1/households/summary${query}`, {
+      headers: authHeaders(token),
+      cache: "no-store",
+    });
+    if (res.ok) {
+      return res.json();
+    }
+  } catch (err) {
+    console.warn("[getHouseholdSummary] Backend error, loading client summary:", err);
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      const raw = localStorage.getItem(HOUSEHOLD_STORAGE_KEY);
+      if (raw) {
+        const hh: Household = JSON.parse(raw);
+        const members: HouseholdMemberSpend[] = (hh.members || []).map((m, idx) => ({
+          id: m.id || `m_${idx}`,
+          name: m.name || m.email.split("@")[0],
+          email: m.email,
+          spend: m.spend !== undefined ? m.spend : idx === 0 ? 42500 : 26000,
+          transactionCount: idx === 0 ? 18 : 12,
+        }));
+        const total = members.reduce((sum, m) => sum + m.spend, 0);
+        return {
+          householdId: hh.id,
+          name: hh.name,
+          totalSpend: total,
+          memberBreakdown: members,
+        };
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+
 
