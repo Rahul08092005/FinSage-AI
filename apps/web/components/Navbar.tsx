@@ -27,13 +27,17 @@ export function Navbar() {
     pathname?.startsWith("/goals") ||
     pathname?.startsWith("/documents") ||
     pathname?.startsWith("/advisor") ||
-    pathname?.startsWith("/financial-plan");
+    pathname?.startsWith("/financial-plan") ||
+    pathname?.startsWith("/what-if") ||
+    pathname?.startsWith("/experiments");
 
   const navLinks = [
     { href: "/dashboard", label: "Dashboard" },
     { href: "/transactions", label: "Transactions" },
     { href: "/budgets", label: "Budgets" },
     { href: "/goals", label: "Goals" },
+    { href: "/what-if", label: "What-If" },
+    { href: "/experiments", label: "Experiments" },
     { href: "/documents", label: "Documents" },
     { href: "/advisor", label: "AI Advisor", isAi: true },
     { href: "/financial-plan", label: "Financial Plan" },
