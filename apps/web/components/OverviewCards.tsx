@@ -5,6 +5,7 @@ import { AuthGate } from "@/components/AuthGate";
 import { DominantBalanceHero } from "@/components/DominantBalanceHero";
 import { SpendingCharts } from "@/components/SpendingCharts";
 import { InsightsFeed } from "@/components/InsightsFeed";
+import { FinancialGraph } from "@/components/FinancialGraph";
 import {
   getExpenseSummary,
   getHealthScore,
@@ -90,7 +91,10 @@ function AuthenticatedOverviewCards({ token }: { token: string }) {
         warningCategories={warningCategories}
       />
 
-      {/* 3. Pattern Intelligence Feed */}
+      {/* 3. Financial Flow Graph: Income -> Savings/Expenses -> Categories -> Top Merchants */}
+      <FinancialGraph token={token} />
+
+      {/* 4. Pattern Intelligence Feed */}
       <InsightsFeed token={token} onInsightsLoaded={setInsights} />
     </div>
   );
