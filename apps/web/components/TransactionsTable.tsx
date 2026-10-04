@@ -1051,37 +1051,28 @@ export function TransactionsTable({ token }: { token: string }) {
             </p>
           </div>
 
-          {/* Hero Right: Owl Mascot #1 + Add Button + Doodles */}
+          {/* Hero Right: Owl Mascot #1 + Doodles */}
           <div className="flex items-center gap-3 sm:gap-6 self-start md:self-center">
             <div className="hidden sm:flex flex-col items-end text-right">
-              <span className="font-serif text-[11px] font-bold italic text-[#18122B]/70">
+              <span className="font-serif text-xs sm:text-sm font-bold italic text-[#18122B]/75">
                 small spends, big picture
               </span>
-              <span className="font-serif text-[10px] text-[#18122B]/50 italic">
+              <span className="font-serif text-[11px] sm:text-xs text-[#18122B]/55 italic">
                 same you, better money 💖
               </span>
             </div>
 
-            {/* Owl Mascot #1 (Writing in ledger) */}
-            <div className="relative w-24 sm:w-32 h-20 sm:h-24 shrink-0 flex items-center justify-center">
+            {/* Owl Mascot #1 (Writing in ledger - Enlarged) */}
+            <div className="relative w-32 sm:w-44 lg:w-48 h-28 sm:h-36 lg:h-40 shrink-0 flex items-center justify-center">
               <Image
                 src="/owl-transactions-hero.png"
                 alt="FinSage Owl Ledger Mascot"
-                width={140}
-                height={120}
+                width={220}
+                height={180}
                 priority
                 className="w-auto h-full object-contain pointer-events-none drop-shadow-sm select-none"
               />
             </div>
-
-            <button
-              type="button"
-              onClick={handleFocusComposer}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-[#18122B] px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-[#18122B]/90 transition cursor-pointer"
-            >
-              <span>+ Add Transaction</span>
-              <span>→</span>
-            </button>
           </div>
         </div>
       </div>
