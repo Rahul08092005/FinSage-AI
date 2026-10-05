@@ -172,12 +172,6 @@ export function Navbar() {
           ) : (
             <div className="flex items-center gap-2 sm:gap-3">
               <Link
-                href="/signin"
-                className="px-3 py-1.5 text-xs font-bold text-[#18122B]/80 transition hover:text-[#18122B]"
-              >
-                Sign In
-              </Link>
-              <Link
                 href="/signup"
                 className="rounded-full bg-[#84cc16] px-4 py-1.5 text-xs font-black text-[#18122B] shadow-sm transition hover:bg-[#a3e635] hover:scale-105 active:scale-95"
               >
