@@ -12,14 +12,6 @@ const salarySchema = z.object({
   monthlySalary: z.number().positive(),
 });
 
-<<<<<<< HEAD
-const taxProfileSchema = z.object({
-  taxRegime: z.enum(["old", "new"]).optional(),
-  annualIncome: z.number().positive().optional(),
-  current80cInvestments: z.number().nonnegative().optional().default(0),
-});
-
-=======
 const taxProfileSchema = z
   .object({
     taxRegime: z.enum(["old", "new"]).optional(),
@@ -29,7 +21,7 @@ const taxProfileSchema = z
   .refine((d) => d.taxRegime !== undefined || d.annualIncome !== undefined || d.current80cInvestments !== undefined, {
     message: "Provide at least one of taxRegime, annualIncome, or current80cInvestments",
   });
->>>>>>> e6734f7 ("Something")
+
 export async function getMe(req: AuthedRequest, res: Response) {
   const user = await prisma.user.findUnique({
     where: { id: req.userId },
@@ -82,12 +74,9 @@ export async function updateSalary(req: AuthedRequest, res: Response) {
   });
 }
 
-<<<<<<< HEAD
-=======
 // ---------------------------------------------------------------------------
 // GET /api/v1/users/tax-profile & /api/v1/users/me/tax-profile
 // ---------------------------------------------------------------------------
->>>>>>> e6734f7 ("Something")
 export async function getTaxProfile(req: AuthedRequest, res: Response) {
   const user = await prisma.user.findUnique({
     where: { id: req.userId },
@@ -118,44 +107,25 @@ export async function updateTaxProfile(req: AuthedRequest, res: Response) {
     req.body.current_80c_investments ??
     req.body.currentInvestments ??
     0;
-  const taxRegime = req.body.taxRegime;
 
   const parsed = taxProfileSchema.safeParse({
-<<<<<<< HEAD
-    annualIncome: income ? Number(income) : undefined,
-    current80cInvestments: current80c ? Number(current80c) : 0,
-    taxRegime: taxRegime ? String(taxRegime) : undefined,
-=======
     ...(rawIncome !== undefined && rawIncome !== null && rawIncome !== "" ? { annualIncome: Number(rawIncome) } : {}),
     ...(rawRegime ? { taxRegime: rawRegime } : {}),
     current80cInvestments: Number(raw80c),
->>>>>>> e6734f7 ("Something")
   });
 
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-<<<<<<< HEAD
-  const { annualIncome, current80cInvestments, taxRegime: regime } = parsed.data;
-
-  const updateData: any = {};
-=======
   const { taxRegime, annualIncome, current80cInvestments } = parsed.data;
 
   const updateData: any = {};
   if (taxRegime !== undefined) updateData.taxRegime = taxRegime;
->>>>>>> e6734f7 ("Something")
   if (annualIncome !== undefined) {
     updateData.annualIncome = annualIncome;
     updateData.monthlySalary = annualIncome / 12;
   }
-<<<<<<< HEAD
-  if (regime !== undefined) {
-    updateData.taxRegime = regime;
-  }
-=======
->>>>>>> e6734f7 ("Something")
 
   const updated = await prisma.user.update({
     where: { id: req.userId },
@@ -170,63 +140,6 @@ export async function updateTaxProfile(req: AuthedRequest, res: Response) {
     },
   });
 
-<<<<<<< HEAD
-  // Gather user context to generate comprehensive financial plan via AI engine
-  const now = new Date();
-  const threeMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 3, 1));
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-
-  const [transactions, budgets, goals] = await Promise.all([
-    prisma.transaction.findMany({
-      where: { userId: req.userId, transactionDate: { gte: threeMonthsAgo } },
-      orderBy: { transactionDate: "desc" },
-    }),
-    prisma.budget.findMany({ where: { userId: req.userId } }),
-    prisma.goal.findMany({ where: { userId: req.userId } }),
-  ]);
-
-  const budgetVariance = await Promise.all(
-    budgets.map(async (b) => {
-      const spent = await prisma.transaction.aggregate({
-        where: { userId: req.userId, category: b.category, transactionDate: { gte: monthStart } },
-        _sum: { amount: true },
-      });
-      const spentAmount = Number(spent._sum.amount ?? 0);
-      return {
-        category: b.category,
-        limit: Number(b.monthlyLimit),
-        spent: spentAmount,
-        remaining: Number(b.monthlyLimit) - spentAmount,
-      };
-    })
-  );
-
-  let markdown = "";
-  try {
-    const genRes = await fetch(`${AI_ENGINE_BASE}/internal/reports/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        transactions,
-        budgets: budgetVariance,
-        goals,
-        health_score: null,
-        income: annualIncome ?? (Number(updated.monthlySalary) * 12),
-        current_investments: current80cInvestments,
-      }),
-    });
-
-    if (genRes.ok) {
-      const genBody = await genRes.json();
-      markdown = genBody.markdown || "";
-    }
-  } catch (err: any) {
-    console.error("[updateTaxProfile] AI engine error:", err.message);
-  }
-
-  res.json({
-    success: true,
-=======
   // Audit log
   console.log(
     `[AUDIT] userId=${req.userId} action=user.updateTaxProfile taxRegime=${updated.taxRegime ?? "unchanged"} timestamp=${new Date().toISOString()}`
@@ -287,21 +200,14 @@ export async function updateTaxProfile(req: AuthedRequest, res: Response) {
   }
 
   res.json({
->>>>>>> e6734f7 ("Something")
     id: updated.id,
     name: updated.name,
     email: updated.email,
     monthlySalary: updated.monthlySalary !== null ? Number(updated.monthlySalary) : null,
     taxRegime: updated.taxRegime ?? null,
     annualIncome: updated.annualIncome !== null ? Number(updated.annualIncome) : null,
-<<<<<<< HEAD
-    current80cInvestments,
-    markdown,
-=======
     current80cInvestments: current80cInvestments ?? 0,
     markdown,
     success: true,
->>>>>>> e6734f7 ("Something")
   });
 }
-

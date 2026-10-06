@@ -1,9 +1,6 @@
 import multer from "multer";
 import { Router } from "express";
-<<<<<<< HEAD
 import {
-=======
->>>>>>> e6734f7 ("Something")
   createTransaction,
   deleteTransaction,
   listTransactions,
