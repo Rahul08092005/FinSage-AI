@@ -13,7 +13,6 @@ const links: NavLink[] = [
   { label: "Transactions", href: "/transactions" },
   { label: "Budgets", href: "/budgets" },
   { label: "Goals", href: "/goals" },
-  { label: "Documents", href: "/documents" },
   { label: "AI Advisor", href: "/advisor" },
   { label: "Financial Plan", href: "/financial-plan" },
 ];

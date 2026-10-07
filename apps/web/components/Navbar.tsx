@@ -47,7 +47,6 @@ export function Navbar() {
     { href: "/what-if", label: "What-If" },
     { href: "/experiments", label: "Experiments" },
     { href: "/household", label: "Household" },
-    { href: "/documents", label: "Documents" },
     { href: "/advisor", label: "AI Advisor", isAi: true },
     { href: "/financial-plan", label: "Financial Plan" },
   ];
