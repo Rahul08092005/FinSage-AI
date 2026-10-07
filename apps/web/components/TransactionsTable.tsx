@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import Image from "next/image";
+import { useSearchParams } from "next/navigation";
 import {
   createTransaction,
   deleteTransaction,
@@ -10,11 +11,16 @@ import {
   importTransactionsCsv,
   parseSms,
   confirmSmsTransaction,
+  getDocuments,
+  getDocumentStatus,
+  uploadDocument,
+  deleteDocument,
   getInsights,
   generateInsights,
   type InsightItem,
 } from "@/lib/api";
 import { formatINR } from "@/lib/formatCurrency";
+import { DocumentReviewModal, type ReviewDocument } from "@/components/DocumentReviewModal";
 
 export interface TransactionItem {
   id: string;
@@ -27,6 +33,23 @@ export interface TransactionItem {
   accountId?: string;
   createdAt?: string;
   updatedAt?: string;
+  documentId?: string;
+}
+
+export interface DocumentItem {
+  id: string;
+  title: string;
+  docType: string;
+  status: "QUEUED" | "PROCESSING" | "NEEDS_REVIEW" | "COMPLETED" | "FAILED" | string;
+  confidence: number | null;
+  uploadedAt: string;
+  extractedJson?: any;
+  ocrError?: string | null;
+  processing_error?: string | null;
+  error?: string | null;
+  errorMessage?: string | null;
+  detail?: string | null;
+  [key: string]: any;
 }
 
 // Category visual metadata mapping
@@ -352,15 +375,15 @@ function DonutChart({
   categories: Array<{ name: string; total: number; pct: number; color: string }>;
   total: number;
 }) {
-  const size = 110;
-  const strokeWidth = 14;
+  const size = 100;
+  const strokeWidth = 12;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
 
   let accumulatedOffset = 0;
 
   return (
-    <div className="relative flex items-center justify-center w-28 h-28 shrink-0">
+    <div className="relative flex items-center justify-center w-24 h-24 shrink-0">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
         <circle
           cx={size / 2}
@@ -395,23 +418,48 @@ function DonutChart({
           })}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none px-1">
-        <span className="font-mono text-xs font-bold text-[#18122B] leading-tight">
+        <span className="font-mono text-[11px] font-bold text-[#18122B] leading-tight">
           {formatINR(total)}
         </span>
-        <span className="text-[9px] text-[#18122B]/60 font-medium">Total Spent</span>
+        <span className="text-[8px] text-[#18122B]/60 font-medium">Spent</span>
       </div>
     </div>
   );
 }
 
-export function TransactionsTable({ token }: { token: string }) {
+export function TransactionsTable({
+  token,
+  initialView = "transactions",
+}: {
+  token: string;
+  initialView?: "transactions" | "documents" | "all";
+}) {
+  const searchParams = useSearchParams();
+  const queryView = searchParams?.get("view");
+
+  // Top Segmented View: transactions | documents | all
+  const [viewMode, setViewMode] = useState<"transactions" | "documents" | "all">(
+    queryView === "documents"
+      ? "documents"
+      : queryView === "all"
+      ? "all"
+      : initialView
+  );
+
+  useEffect(() => {
+    if (queryView === "documents" || queryView === "all" || queryView === "transactions") {
+      setViewMode(queryView as any);
+    }
+  }, [queryView]);
+
+  // 1. Transactions State
   const [items, setItems] = useState<TransactionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [importingCsv, setImportingCsv] = useState(false);
 
   // Form Mode & Inputs
-  const [activeTab, setActiveTab] = useState<"quickAdd" | "pasteSms">("quickAdd");
+  const [activeTab, setActiveTab] = useState<"quickAdd" | "pasteSms" | "uploadDoc">("quickAdd");
   const [form, setForm] = useState({
     amount: "",
     category: "Food & Dining",
@@ -426,10 +474,6 @@ export function TransactionsTable({ token }: { token: string }) {
   const [selectedDateFilter, setSelectedDateFilter] = useState("All");
   const [selectedAmountRange, setSelectedAmountRange] = useState("All");
   const [sortBy, setSortBy] = useState<"latest" | "oldest" | "highest" | "lowest">("latest");
-
-  // Timeframe selectors for right cards
-  const [breakdownTimeframe, setBreakdownTimeframe] = useState<"thisMonth" | "all">("thisMonth");
-  const [merchantsTimeframe, setMerchantsTimeframe] = useState<"thisMonth" | "all">("thisMonth");
 
   // Action Menu Dropdown active ID
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
@@ -448,16 +492,33 @@ export function TransactionsTable({ token }: { token: string }) {
   const [deleteCandidate, setDeleteCandidate] = useState<TransactionItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // AI Insights State
+  // 2. Documents State
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(true);
+  const [docFile, setDocFile] = useState<File | null>(null);
+  const [docType, setDocType] = useState<string>("receipt");
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [uploadDocError, setUploadDocError] = useState<string | null>(null);
+  const [currentProcessingDoc, setCurrentProcessingDoc] = useState<DocumentItem | null>(null);
+  const [vaultFilter, setVaultFilter] = useState<"all" | "receipt" | "bank_statement" | "other">("all");
+  const [reviewDoc, setReviewDoc] = useState<ReviewDocument | null>(null);
+  const [isLoadingReview, setIsLoadingReview] = useState(false);
+  const [confirmDeleteDocId, setConfirmDeleteDocId] = useState<string | null>(null);
+  const [isDeletingDoc, setIsDeletingDoc] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  // 3. AI Insights State
   const [insights, setInsights] = useState<InsightItem[]>([]);
   const [loadingInsights, setLoadingInsights] = useState(false);
   const [refreshingInsights, setRefreshingInsights] = useState(false);
 
   // DOM Refs
   const csvInputRef = useRef<HTMLInputElement | null>(null);
+  const docFileInputRef = useRef<HTMLInputElement | null>(null);
   const amountInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const smsTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const docPollRef = useRef<NodeJS.Timeout | null>(null);
 
   // SMS Quick-Add State
   const [smsText, setSmsText] = useState("");
@@ -472,7 +533,7 @@ export function TransactionsTable({ token }: { token: string }) {
   }
 
   // Load transactions
-  const load = useCallback(async () => {
+  const loadTransactions = useCallback(async () => {
     setLoading(true);
     try {
       const data = await getTransactions(token, 100);
@@ -486,6 +547,21 @@ export function TransactionsTable({ token }: { token: string }) {
       console.error("Failed to load transactions:", e);
     } finally {
       setLoading(false);
+    }
+  }, [token]);
+
+  // Load documents
+  const loadDocumentsList = useCallback(async (quiet = false) => {
+    if (!quiet) setLoadingDocs(true);
+    try {
+      const docs = await getDocuments(token);
+      if (Array.isArray(docs)) {
+        setDocuments(docs);
+      }
+    } catch (e: any) {
+      console.error("Failed to load documents:", e.message);
+    } finally {
+      if (!quiet) setLoadingDocs(false);
     }
   }, [token]);
 
@@ -505,9 +581,40 @@ export function TransactionsTable({ token }: { token: string }) {
   }, [token]);
 
   useEffect(() => {
-    load();
+    loadTransactions();
+    loadDocumentsList();
     loadInsights();
-  }, [load, loadInsights]);
+  }, [loadTransactions, loadDocumentsList, loadInsights]);
+
+  // Polling for processing documents
+  const hasPendingDocs = documents.some(
+    (d) => d.status === "QUEUED" || d.status === "PROCESSING"
+  );
+
+  useEffect(() => {
+    if (!hasPendingDocs && !currentProcessingDoc) return;
+
+    docPollRef.current = setInterval(async () => {
+      try {
+        await loadDocumentsList(true);
+        if (currentProcessingDoc) {
+          const updated = await getDocumentStatus(token, currentProcessingDoc.id);
+          if (updated && (updated.status === "COMPLETED" || updated.status === "NEEDS_REVIEW" || updated.status === "FAILED")) {
+            setCurrentProcessingDoc(null);
+            if (updated.status === "NEEDS_REVIEW") {
+              setReviewDoc(updated);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Polling status error:", err);
+      }
+    }, 2500);
+
+    return () => {
+      if (docPollRef.current) clearInterval(docPollRef.current);
+    };
+  }, [hasPendingDocs, currentProcessingDoc, token, loadDocumentsList]);
 
   // Close menus on outside click
   useEffect(() => {
@@ -520,14 +627,6 @@ export function TransactionsTable({ token }: { token: string }) {
     window.addEventListener("click", handleClickOutside);
     return () => window.removeEventListener("click", handleClickOutside);
   }, []);
-
-  // Focus composer when clicking "+ Add Transaction" in header
-  function handleFocusComposer() {
-    composerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    setTimeout(() => {
-      amountInputRef.current?.focus();
-    }, 200);
-  }
 
   // Handle Add Transaction
   async function handleAdd(e?: React.FormEvent) {
@@ -549,7 +648,7 @@ export function TransactionsTable({ token }: { token: string }) {
         date: new Date().toISOString().slice(0, 10),
       });
       showToast("Transaction recorded successfully! ✦");
-      load();
+      loadTransactions();
     } catch (err: any) {
       console.error(err);
       showToast("Error recording transaction");
@@ -567,7 +666,7 @@ export function TransactionsTable({ token }: { token: string }) {
     try {
       const res = await importTransactionsCsv(token, file);
       showToast(`Imported ${res.count || "several"} transactions!`);
-      load();
+      loadTransactions();
     } catch (err: any) {
       console.error("CSV import error:", err);
       showToast(`Import failed: ${err.message || "Invalid file"}`);
@@ -686,7 +785,7 @@ export function TransactionsTable({ token }: { token: string }) {
       }
 
       await confirmSmsTransaction(token, payload);
-      await load();
+      await loadTransactions();
       setSmsText("");
       setSmsDraft(null);
       setSmsError(null);
@@ -699,6 +798,77 @@ export function TransactionsTable({ token }: { token: string }) {
       setSmsError(msg);
     } finally {
       setIsConfirmingSms(false);
+    }
+  }
+
+  // Handle Document Upload
+  async function handleDocUpload() {
+    if (!docFile) {
+      setUploadDocError("Please select or drop a document file first.");
+      return;
+    }
+
+    setUploadDocError(null);
+    setUploadingDoc(true);
+
+    try {
+      const res = await uploadDocument(token, docFile, docType);
+      showToast(`Document "${docFile.name}" deposited to vault.`);
+
+      const newDoc: DocumentItem = {
+        id: res.documentId || res.id,
+        title: docFile.name,
+        docType: docType,
+        status: res.status || "QUEUED",
+        confidence: null,
+        uploadedAt: new Date().toISOString(),
+      };
+      setCurrentProcessingDoc(newDoc);
+      setDocFile(null);
+      if (docFileInputRef.current) docFileInputRef.current.value = "";
+
+      await loadDocumentsList(true);
+    } catch (e: any) {
+      setUploadDocError(e.message || "Failed to upload document");
+    } finally {
+      setUploadingDoc(false);
+    }
+  }
+
+  // Open Document Review Modal
+  async function handleOpenDocReview(doc: DocumentItem) {
+    setIsLoadingReview(true);
+    try {
+      const fullDoc = await getDocumentStatus(token, doc.id);
+      setReviewDoc(fullDoc || doc);
+    } catch {
+      setReviewDoc(doc);
+    } finally {
+      setIsLoadingReview(false);
+    }
+  }
+
+  // Delete Document
+  async function handleDeleteDoc(id: string, e?: React.MouseEvent) {
+    if (e) e.stopPropagation();
+
+    if (confirmDeleteDocId !== id) {
+      setConfirmDeleteDocId(id);
+      return;
+    }
+
+    setIsDeletingDoc(true);
+    try {
+      await deleteDocument(token, id);
+      setDocuments((prev) => prev.filter((d) => d.id !== id));
+      if (reviewDoc && reviewDoc.id === id) setReviewDoc(null);
+      if (currentProcessingDoc && currentProcessingDoc.id === id) setCurrentProcessingDoc(null);
+      setConfirmDeleteDocId(null);
+      showToast("Document deleted from vault.");
+    } catch (err: any) {
+      alert(err.message || "Failed to delete document");
+    } finally {
+      setIsDeletingDoc(false);
     }
   }
 
@@ -753,7 +923,7 @@ export function TransactionsTable({ token }: { token: string }) {
       });
       showToast("Transaction updated!");
       setEditItem(null);
-      load();
+      loadTransactions();
     } catch (err: any) {
       console.error(err);
       showToast("Failed to update transaction");
@@ -776,7 +946,7 @@ export function TransactionsTable({ token }: { token: string }) {
       await deleteTransaction(token, deleteCandidate.id);
       showToast("Transaction deleted");
       setDeleteCandidate(null);
-      load();
+      loadTransactions();
     } catch (err: any) {
       console.error(err);
       showToast("Failed to delete transaction");
@@ -800,138 +970,125 @@ export function TransactionsTable({ token }: { token: string }) {
       return d.getFullYear() === currYear && d.getMonth() === currMonth;
     });
 
-    const lastMonthItems = items.filter((i) => {
+    const prevMonthItems = items.filter((i) => {
       const d = new Date(i.transactionDate);
       return d.getFullYear() === prevYear && d.getMonth() === prevMonth;
     });
 
-    // If current month has items, use them; otherwise fallback to all items for top category
-    const activeSet = currentMonthItems.length > 0 ? currentMonthItems : items;
+    const thisMonthSpent = currentMonthItems.reduce((acc, cur) => acc + Number(cur.amount || 0), 0);
+    const prevMonthSpent = prevMonthItems.reduce((acc, cur) => acc + Number(cur.amount || 0), 0);
 
-    // 1. This Month Spend
-    const thisMonthSpent = currentMonthItems.reduce((acc, i) => acc + Number(i.amount || 0), 0);
-    const lastMonthSpent = lastMonthItems.reduce((acc, i) => acc + Number(i.amount || 0), 0);
+    const isSpendDown = thisMonthSpent <= prevMonthSpent;
+    const spendDiff = Math.abs(thisMonthSpent - prevMonthSpent);
+    const momSpendDiff =
+      prevMonthSpent > 0
+        ? `${isSpendDown ? "↓" : "↑"} ${Math.round((spendDiff / prevMonthSpent) * 100)}% vs last mo`
+        : "Current period";
 
-    let momSpendDiff = "-100%";
-    let isSpendDown = true;
-    if (lastMonthSpent > 0) {
-      const diff = Math.round(((thisMonthSpent - lastMonthSpent) / lastMonthSpent) * 100);
-      momSpendDiff = `${diff >= 0 ? "+" : ""}${diff}% vs last month`;
-      isSpendDown = diff <= 0;
-    } else if (thisMonthSpent > 0) {
-      momSpendDiff = "Active month";
-      isSpendDown = false;
+    // Top Category
+    const catMap: Record<string, number> = {};
+    for (const item of currentMonthItems) {
+      catMap[item.category] = (catMap[item.category] || 0) + Number(item.amount || 0);
     }
-
-    // 2. Transaction Count
-    const transactionCount = items.length;
-    const thisMonthTxCount = currentMonthItems.length;
-    const lastMonthTxCount = lastMonthItems.length;
-
-    let momTxDiff = "+0%";
-    if (lastMonthTxCount > 0) {
-      const diff = Math.round(((thisMonthTxCount - lastMonthTxCount) / lastMonthTxCount) * 100);
-      momTxDiff = `${diff >= 0 ? "+" : ""}${diff}% vs last month`;
-    } else if (thisMonthTxCount > 0) {
-      momTxDiff = `+${thisMonthTxCount} this month`;
-    }
-
-    // 3. Top Category
-    const categoryTotals: Record<string, number> = {};
-    for (const item of activeSet) {
-      const cat = item.category || "General";
-      categoryTotals[cat] = (categoryTotals[cat] || 0) + Number(item.amount || 0);
-    }
-
-    let topCategoryName = "General";
-    let topCategoryAmount = 0;
-    let maxSpend = -1;
-
-    for (const [cat, amt] of Object.entries(categoryTotals)) {
-      if (amt > maxSpend) {
-        maxSpend = amt;
-        topCategoryName = cat;
-        topCategoryAmount = amt;
+    let topCat = "General";
+    let topCatAmt = 0;
+    for (const [cat, amt] of Object.entries(catMap)) {
+      if (amt > topCatAmt) {
+        topCat = cat;
+        topCatAmt = amt;
       }
     }
 
-    // 4. Avg Daily Spend (Current Month)
-    const currentDay = Math.max(1, now.getDate());
-    const avgDailySpend = thisMonthSpent > 0 ? Math.round(thisMonthSpent / currentDay) : 0;
+    const dayOfMonth = Math.max(1, now.getDate());
+    const avgDailySpend = Math.round(thisMonthSpent / dayOfMonth);
+
+    const transactionCount = currentMonthItems.length;
+    const prevTransactionCount = prevMonthItems.length;
+    const txDiff = transactionCount - prevTransactionCount;
+    const momTxDiff =
+      prevTransactionCount > 0
+        ? `${txDiff >= 0 ? "+" : ""}${txDiff} vs last mo`
+        : `${transactionCount} recorded`;
+
+    // Vault Stats
+    const totalDocs = documents.length;
+    const reconciledDocs = documents.filter((d) => d.status === "COMPLETED").length;
+    const needsReviewDocs = documents.filter((d) => d.status === "NEEDS_REVIEW").length;
 
     return {
       thisMonthSpent,
-      momSpendDiff,
+      prevMonthSpent,
       isSpendDown,
+      momSpendDiff,
       transactionCount,
       momTxDiff,
-      topCategoryName,
-      topCategoryAmount,
-      topCategoryMeta: getCategoryMeta(topCategoryName),
+      topCategoryName: topCat,
+      topCategoryAmount: topCatAmt,
+      topCategoryMeta: getCategoryMeta(topCat),
       avgDailySpend,
+      totalDocs,
+      reconciledDocs,
+      needsReviewDocs,
     };
-  }, [items]);
+  }, [items, documents]);
 
-  // Filter & Sort Items
+  // Filtered transactions list
   const filteredItems = useMemo(() => {
     let result = [...items];
 
-    // Search query filter
     if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
+      const q = searchQuery.toLowerCase().trim();
       result = result.filter(
-        (t) =>
-          t.description.toLowerCase().includes(query) ||
-          t.category.toLowerCase().includes(query) ||
-          String(t.amount).includes(query) ||
-          (t.source && t.source.toLowerCase().includes(query))
+        (i) =>
+          (i.description && i.description.toLowerCase().includes(q)) ||
+          (i.category && i.category.toLowerCase().includes(q)) ||
+          (i.source && i.source.toLowerCase().includes(q))
       );
     }
 
-    // Category filter
     if (selectedCategory !== "All") {
-      result = result.filter(
-        (t) => t.category.toLowerCase() === selectedCategory.toLowerCase()
-      );
+      result = result.filter((i) => i.category === selectedCategory);
     }
 
-    // Date Filter
     if (selectedDateFilter !== "All") {
       const now = new Date();
       const currYear = now.getFullYear();
       const currMonth = now.getMonth();
 
       if (selectedDateFilter === "thisMonth") {
-        result = result.filter((t) => {
-          const d = new Date(t.transactionDate);
+        result = result.filter((i) => {
+          const d = new Date(i.transactionDate);
           return d.getFullYear() === currYear && d.getMonth() === currMonth;
         });
       } else if (selectedDateFilter === "lastMonth") {
-        const prev = new Date(currYear, currMonth - 1, 1);
-        result = result.filter((t) => {
-          const d = new Date(t.transactionDate);
-          return d.getFullYear() === prev.getFullYear() && d.getMonth() === prev.getMonth();
+        const prevMonthDate = new Date(currYear, currMonth - 1, 1);
+        const pYear = prevMonthDate.getFullYear();
+        const pMonth = prevMonthDate.getMonth();
+        result = result.filter((i) => {
+          const d = new Date(i.transactionDate);
+          return d.getFullYear() === pYear && d.getMonth() === pMonth;
         });
       } else if (selectedDateFilter === "last30Days") {
-        const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        result = result.filter((t) => new Date(t.transactionDate) >= cutoff);
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 30);
+        result = result.filter((i) => new Date(i.transactionDate) >= cutoff);
       } else if (selectedDateFilter === "thisYear") {
-        result = result.filter((t) => new Date(t.transactionDate).getFullYear() === currYear);
+        result = result.filter((i) => new Date(i.transactionDate).getFullYear() === currYear);
       }
     }
 
-    // Amount range filter
-    if (selectedAmountRange === "under500") {
-      result = result.filter((t) => Number(t.amount) < 500);
-    } else if (selectedAmountRange === "500to2000") {
-      result = result.filter((t) => Number(t.amount) >= 500 && Number(t.amount) <= 2000);
-    } else if (selectedAmountRange === "2000to10000") {
-      result = result.filter((t) => Number(t.amount) > 2000 && Number(t.amount) <= 10000);
-    } else if (selectedAmountRange === "above10000") {
-      result = result.filter((t) => Number(t.amount) > 10000);
+    if (selectedAmountRange !== "All") {
+      if (selectedAmountRange === "under500") {
+        result = result.filter((i) => Number(i.amount) < 500);
+      } else if (selectedAmountRange === "500to2000") {
+        result = result.filter((i) => Number(i.amount) >= 500 && Number(i.amount) <= 2000);
+      } else if (selectedAmountRange === "2000to10000") {
+        result = result.filter((i) => Number(i.amount) > 2000 && Number(i.amount) <= 10000);
+      } else if (selectedAmountRange === "above10000") {
+        result = result.filter((i) => Number(i.amount) > 10000);
+      }
     }
 
-    // Sorting
     result.sort((a, b) => {
       if (sortBy === "latest") {
         return new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime();
@@ -951,22 +1108,62 @@ export function TransactionsTable({ token }: { token: string }) {
     return result;
   }, [items, searchQuery, selectedCategory, selectedDateFilter, selectedAmountRange, sortBy]);
 
-  // Spending Breakdown data (Right Column - Card 1)
+  // Filtered documents list
+  const filteredDocuments = useMemo(() => {
+    let list = [...documents];
+    if (vaultFilter !== "all") {
+      list = list.filter((d) => {
+        const lower = (d.docType || "").toLowerCase();
+        if (vaultFilter === "receipt") return lower.includes("receipt");
+        if (vaultFilter === "bank_statement") return lower.includes("statement") || lower.includes("bank");
+        return !lower.includes("receipt") && !lower.includes("statement");
+      });
+    }
+    return list;
+  }, [documents, vaultFilter]);
+
+  // Combined Activity feed for "All Activity" view
+  const combinedActivity = useMemo(() => {
+    const txEvents = items.map((tx) => ({
+      type: "transaction" as const,
+      id: tx.id,
+      date: tx.transactionDate,
+      title: tx.description,
+      subtitle: `${tx.category} • ${tx.source || "MANUAL"}`,
+      amount: tx.amount,
+      isDebit: true,
+      raw: tx,
+    }));
+
+    const docEvents = documents.map((doc) => ({
+      type: "document" as const,
+      id: doc.id,
+      date: doc.uploadedAt,
+      title: doc.title,
+      subtitle: `VAULT: ${doc.docType.replace("_", " ").toUpperCase()} • ${doc.status}`,
+      amount: null,
+      isDebit: false,
+      raw: doc,
+    }));
+
+    const combined = [...txEvents, ...docEvents];
+    combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return combined;
+  }, [items, documents]);
+
+  // Spending Breakdown data
   const spendingBreakdown = useMemo(() => {
     const now = new Date();
     const currYear = now.getFullYear();
     const currMonth = now.getMonth();
 
-    const activeSet =
-      breakdownTimeframe === "thisMonth"
-        ? items.filter((i) => {
-            const d = new Date(i.transactionDate);
-            return d.getFullYear() === currYear && d.getMonth() === currMonth;
-          })
-        : items;
+    const currentMonthItems = items.filter((i) => {
+      const d = new Date(i.transactionDate);
+      return d.getFullYear() === currYear && d.getMonth() === currMonth;
+    });
 
     const totals: Record<string, number> = {};
-    for (const item of activeSet) {
+    for (const item of currentMonthItems) {
       const cat = item.category || "General";
       totals[cat] = (totals[cat] || 0) + Number(item.amount || 0);
     }
@@ -983,45 +1180,61 @@ export function TransactionsTable({ token }: { token: string }) {
 
     return {
       total: totalAll === 1 && Object.keys(totals).length === 0 ? 0 : totalAll,
-      categories: sorted.length > 0 ? sorted.slice(0, 5) : [
+      categories: sorted.length > 0 ? sorted.slice(0, 4) : [
         { name: "No Data", total: 0, pct: 100, color: "#E5DAC4" },
       ],
     };
-  }, [items, breakdownTimeframe]);
+  }, [items]);
 
-  // Top Merchants data (Right Column - Card 2)
-  const topMerchants = useMemo(() => {
-    const now = new Date();
-    const currYear = now.getFullYear();
-    const currMonth = now.getMonth();
-
-    const activeSet =
-      merchantsTimeframe === "thisMonth"
-        ? items.filter((i) => {
-            const d = new Date(i.transactionDate);
-            return d.getFullYear() === currYear && d.getMonth() === currMonth;
-          })
-        : items;
-
-    const totals: Record<string, number> = {};
-    for (const item of activeSet) {
-      const raw = (item.description || "Unknown").trim();
-      const name = raw.charAt(0).toUpperCase() + raw.slice(1);
-      totals[name] = (totals[name] || 0) + Number(item.amount || 0);
+  // Helper for document icon
+  function getDocIcon(type: string, title: string) {
+    const lower = (type + " " + title).toLowerCase();
+    if (lower.includes("statement") || lower.includes("bank") || lower.includes("salary")) {
+      return { icon: "🏦", badge: "STATEMENT", color: "text-indigo-600 bg-indigo-50" };
     }
+    if (lower.includes("receipt") || lower.includes("coffee") || lower.includes("mart")) {
+      return { icon: "🧾", badge: "RECEIPT", color: "text-lime-700 bg-lime-50" };
+    }
+    return { icon: "📄", badge: "DOCUMENT", color: "text-amber-700 bg-amber-50" };
+  }
 
-    const totalAll = Object.values(totals).reduce((a, b) => a + b, 0) || 1;
-    const sorted = Object.entries(totals)
-      .map(([name, total]) => ({
-        name,
-        total,
-        pct: Math.round((total / totalAll) * 100),
-        meta: getMerchantMeta(name, "General"),
-      }))
-      .sort((a, b) => b.total - a.total);
-
-    return sorted.slice(0, 5);
-  }, [items, merchantsTimeframe]);
+  // Render Document Status Pill
+  function renderDocStatus(status: string) {
+    switch (status) {
+      case "COMPLETED":
+        return (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-300 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-800">
+            ✓ RECONCILED
+          </span>
+        );
+      case "NEEDS_REVIEW":
+        return (
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-300 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-800 animate-pulse">
+            ⚠ REVIEW
+          </span>
+        );
+      case "QUEUED":
+      case "PROCESSING":
+        return (
+          <span className="inline-flex items-center gap-1 rounded-full bg-purple-50 border border-purple-200 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-purple-800">
+            <span className="h-1.5 w-1.5 rounded-full bg-purple-600 animate-ping" />
+            PARSING…
+          </span>
+        );
+      case "FAILED":
+        return (
+          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-rose-800">
+            ✕ FAILED
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 border border-stone-200 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-stone-600">
+            ✦ {status}
+          </span>
+        );
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#FAF6ED] text-[#18122B] pb-16 pt-2 px-3 sm:px-6 lg:px-8 max-w-7xl mx-auto">
@@ -1034,79 +1247,130 @@ export function TransactionsTable({ token }: { token: string }) {
       )}
 
       {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          1. COMPACT TRANSACTIONS HERO
+          1. COMPACT TRANSACTIONS + VAULT HERO
       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-      <div className="relative pt-3 sm:pt-4 pb-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="relative pt-2 sm:pt-3 pb-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-100/70 px-2.5 py-0.5 text-[11px] font-bold text-emerald-900 mb-1.5">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-100/70 px-2.5 py-0.5 text-[10px] font-bold text-emerald-900 mb-1">
               <span>🏷️</span>
-              <span className="tracking-wide uppercase">TRANSACTIONS</span>
+              <span className="tracking-wide uppercase">FINANCIAL LEDGER & VAULT</span>
             </div>
-            <h1 className="font-serif text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-[#18122B]">
-              Your money, logged. <span className="text-amber-500">✦</span>
+            <h1 className="font-serif text-2xl sm:text-3xl font-bold tracking-tight text-[#18122B]">
+              Your money, all in one place. <span className="text-amber-500">✦</span>
             </h1>
-            <p className="text-xs sm:text-sm text-[#18122B]/60 font-medium mt-0.5">
-              Every payment, organized and accounted for.
+            <p className="text-xs text-[#18122B]/60 font-medium mt-0.5">
+              Live double-entry transactions and intelligent document vault unified in a single workspace.
             </p>
           </div>
 
-          {/* Hero Right: Owl Mascot #1 + Doodles */}
-          <div className="flex items-center gap-3 sm:gap-6 self-start md:self-center">
+          {/* Hero Right: Integrated FinSage Owl Mascot */}
+          <div className="flex items-center gap-3 self-start md:self-center">
             <div className="hidden sm:flex flex-col items-end text-right">
-              <span className="font-serif text-xs sm:text-sm font-bold italic text-[#18122B]/75">
+              <span className="font-serif text-xs font-bold italic text-[#18122B]/75">
                 small spends, big picture
               </span>
-              <span className="font-serif text-[11px] sm:text-xs text-[#18122B]/55 italic">
-                same you, better money 💖
+              <span className="font-serif text-[11px] text-[#18122B]/55 italic">
+                receipts + ledger synced 💖
               </span>
             </div>
 
-            {/* Owl Mascot #1 (Writing in ledger - Enlarged) */}
-            <div className="relative w-32 sm:w-44 lg:w-48 h-28 sm:h-36 lg:h-40 shrink-0 flex items-center justify-center">
+            <div className="relative w-28 sm:w-36 h-20 sm:h-24 shrink-0 flex items-center justify-center">
               <Image
                 src="/owl-transactions-hero.png"
-                alt="FinSage Owl Ledger Mascot"
-                width={220}
-                height={180}
+                alt="FinSage Owl Mascot"
+                width={160}
+                height={120}
                 priority
                 className="w-auto h-full object-contain pointer-events-none drop-shadow-sm select-none"
               />
             </div>
           </div>
         </div>
+
+        {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            SEGMENTED VIEW NAVIGATION TABS (Compact)
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+        <div className="mt-3 flex items-center gap-1.5 border-b border-[#E5DAC4] pb-2.5 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setViewMode("transactions")}
+            className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition cursor-pointer shrink-0 ${
+              viewMode === "transactions"
+                ? "bg-[#18122B] text-white shadow-xs"
+                : "bg-white border border-[#DDD9CF] text-[#18122B]/70 hover:text-[#18122B]"
+            }`}
+          >
+            <span>🏷️</span>
+            <span>Transactions</span>
+            <span className="rounded-full bg-white/20 px-1.5 py-0.2 text-[10px] font-mono">
+              {items.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setViewMode("documents")}
+            className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition cursor-pointer shrink-0 ${
+              viewMode === "documents"
+                ? "bg-[#18122B] text-white shadow-xs"
+                : "bg-white border border-[#DDD9CF] text-[#18122B]/70 hover:text-[#18122B]"
+            }`}
+          >
+            <span>📁</span>
+            <span>Document Vault</span>
+            <span className="rounded-full bg-white/20 px-1.5 py-0.2 text-[10px] font-mono">
+              {documents.length}
+            </span>
+            {summaryMetrics.needsReviewDocs > 0 && (
+              <span className="h-2 w-2 rounded-full bg-amber-400 animate-ping" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setViewMode("all")}
+            className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition cursor-pointer shrink-0 ${
+              viewMode === "all"
+                ? "bg-[#18122B] text-white shadow-xs"
+                : "bg-white border border-[#DDD9CF] text-[#18122B]/70 hover:text-[#18122B]"
+            }`}
+          >
+            <span>⚡</span>
+            <span>All Activity</span>
+          </button>
+        </div>
       </div>
 
       {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
           2. FOUR SUMMARY CARDS
       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mt-2 mb-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4">
         {/* Card 1: THIS MONTH */}
-        <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
+        <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3 sm:p-3.5 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-rose-100 text-rose-700 text-[10px]">
                 ↓
               </span>
-              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-[#18122B]/60">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#18122B]/60">
                 THIS MONTH
               </span>
             </div>
-            {/* Sparkline icon visual */}
-            <div className="flex items-end gap-0.5 h-3.5">
-              <div className="w-1 bg-rose-300 h-2 rounded-t-xs" />
-              <div className="w-1 bg-rose-400 h-3 rounded-t-xs" />
+            <div className="flex items-end gap-0.5 h-3">
+              <div className="w-1 bg-rose-300 h-1.5 rounded-t-xs" />
+              <div className="w-1 bg-rose-400 h-2.5 rounded-t-xs" />
               <div className="w-1 bg-rose-500 h-full rounded-t-xs" />
             </div>
           </div>
-          <div className="mt-2">
-            <p className="font-mono text-lg sm:text-2xl font-black text-[#18122B]">
+          <div className="mt-1.5">
+            <p className="font-mono text-lg sm:text-xl font-black text-[#18122B]">
               {formatINR(summaryMetrics.thisMonthSpent)}
             </p>
-            <div className="flex items-center justify-between mt-1">
-              <span className="text-[11px] font-medium text-[#18122B]/50">Spent</span>
+            <div className="flex items-center justify-between mt-0.5">
+              <span className="text-[10px] font-medium text-[#18122B]/50">Total Outflow</span>
               <span
-                className={`text-[10px] font-bold ${
+                className={`text-[9px] font-bold ${
                   summaryMetrics.isSpendDown ? "text-rose-600" : "text-emerald-700"
                 }`}
               >
@@ -1116,27 +1380,26 @@ export function TransactionsTable({ token }: { token: string }) {
           </div>
         </div>
 
-        {/* Card 2: TRANSACTIONS */}
-        <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
+        {/* Card 2: TRANSACTIONS RECORDED */}
+        <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3 sm:p-3.5 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 text-[10px]">
                 ↑
               </span>
-              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-[#18122B]/60">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#18122B]/60">
                 TRANSACTIONS
               </span>
             </div>
-            {/* Line wave visual */}
-            <span className="text-emerald-600 text-xs font-bold font-mono">📈</span>
+            <span className="text-emerald-600 text-xs font-mono">📈</span>
           </div>
-          <div className="mt-2">
-            <p className="font-mono text-lg sm:text-2xl font-black text-[#18122B]">
+          <div className="mt-1.5">
+            <p className="font-mono text-lg sm:text-xl font-black text-[#18122B]">
               {summaryMetrics.transactionCount}
             </p>
-            <div className="flex items-center justify-between mt-1">
-              <span className="text-[11px] font-medium text-[#18122B]/50">Recorded</span>
-              <span className="text-[10px] font-bold text-emerald-700 font-mono">
+            <div className="flex items-center justify-between mt-0.5">
+              <span className="text-[10px] font-medium text-[#18122B]/50">Recorded</span>
+              <span className="text-[9px] font-bold text-emerald-700 font-mono">
                 {summaryMetrics.momTxDiff}
               </span>
             </div>
@@ -1144,77 +1407,82 @@ export function TransactionsTable({ token }: { token: string }) {
         </div>
 
         {/* Card 3: TOP CATEGORY */}
-        <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
+        <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3 sm:p-3.5 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-100 text-purple-700 text-[10px]">
                 🛍️
               </span>
-              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-[#18122B]/60">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#18122B]/60">
                 TOP CATEGORY
               </span>
             </div>
             <span className="text-xs">{summaryMetrics.topCategoryMeta.icon}</span>
           </div>
-          <div className="mt-2">
+          <div className="mt-1.5">
             <div className="flex items-center justify-between">
-              <p className="font-serif text-sm sm:text-base font-bold text-[#18122B] truncate">
+              <p className="font-serif text-sm font-bold text-[#18122B] truncate">
                 {summaryMetrics.topCategoryName}
               </p>
-              <span className="font-mono text-xs sm:text-sm font-bold text-[#18122B]/80">
+              <span className="font-mono text-xs font-bold text-[#18122B]/80">
                 {formatINR(summaryMetrics.topCategoryAmount)}
               </span>
             </div>
-            <p className="text-[10px] sm:text-[11px] font-medium text-[#18122B]/50 mt-1 truncate">
+            <p className="text-[10px] font-medium text-[#18122B]/50 mt-0.5 truncate">
               Highest spending bucket
             </p>
           </div>
         </div>
 
-        {/* Card 4: AVG. DAILY SPEND */}
-        <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs flex flex-col justify-between">
+        {/* Card 4: VAULT DOCUMENTS */}
+        <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3 sm:p-3.5 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-800 text-[10px]">
-                📅
+                📁
               </span>
-              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-[#18122B]/60">
-                AVG. DAILY SPEND
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#18122B]/60">
+                VAULT DOCUMENTS
               </span>
             </div>
-            <div className="flex items-end gap-0.5 h-3.5">
-              <div className="w-1 bg-amber-300 h-2 rounded-t-xs" />
-              <div className="w-1 bg-amber-400 h-3 rounded-t-xs" />
-              <div className="w-1 bg-amber-500 h-full rounded-t-xs" />
-            </div>
+            <span className="text-[10px] font-bold text-emerald-700">
+              {summaryMetrics.reconciledDocs} reconciled
+            </span>
           </div>
-          <div className="mt-2">
-            <p className="font-mono text-lg sm:text-2xl font-black text-[#18122B]">
-              {formatINR(summaryMetrics.avgDailySpend)}
+          <div className="mt-1.5">
+            <p className="font-mono text-lg sm:text-xl font-black text-[#18122B]">
+              {summaryMetrics.totalDocs}
             </p>
-            <p className="text-[10px] sm:text-[11px] font-medium text-[#18122B]/50 mt-1">
-              This month
-            </p>
+            <div className="flex items-center justify-between mt-0.5">
+              <span className="text-[10px] font-medium text-[#18122B]/50">OCR Ingested</span>
+              {summaryMetrics.needsReviewDocs > 0 ? (
+                <span className="text-[9px] font-bold text-amber-800">
+                  {summaryMetrics.needsReviewDocs} need review
+                </span>
+              ) : (
+                <span className="text-[9px] font-bold text-emerald-700">All synced ✓</span>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
       {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          3. ADD A TRANSACTION SECTION
+          3. ADD TRANSACTION / UPLOAD DOCUMENT WORKSPACE
       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
       <div
         ref={composerRef}
-        className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs mb-4"
+        className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3 sm:p-3.5 shadow-2xs mb-4"
       >
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
           <div className="flex items-center gap-2">
             <h2 className="font-serif text-xs sm:text-sm font-bold tracking-tight uppercase text-[#18122B]">
-              ADD A TRANSACTION
+              RECORD ACTIVITY
             </h2>
           </div>
 
           {/* Mode Toggles */}
-          <div className="flex items-center gap-1.5 bg-[#FAF6ED] p-1 rounded-xl border border-[#E5DAC4]">
+          <div className="flex items-center gap-1 bg-[#FAF6ED] p-0.5 rounded-xl border border-[#E5DAC4]">
             <button
               type="button"
               onClick={() => setActiveTab("quickAdd")}
@@ -1239,18 +1507,30 @@ export function TransactionsTable({ token }: { token: string }) {
               <span>📋</span>
               <span>Paste Bank SMS</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("uploadDoc")}
+              className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold transition cursor-pointer ${
+                activeTab === "uploadDoc"
+                  ? "bg-emerald-100 text-emerald-900 border border-emerald-200"
+                  : "text-[#18122B]/60 hover:text-[#18122B]"
+              }`}
+            >
+              <span>✦</span>
+              <span>Upload Document</span>
+            </button>
           </div>
         </div>
 
-        {/* Tab 1: Quick Add Row */}
+        {/* Tab 1: Quick Add Form */}
         {activeTab === "quickAdd" && (
           <form
             onSubmit={handleAdd}
-            className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center"
+            className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center"
           >
             {/* Amount */}
             <div className="sm:col-span-2 relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-[#18122B]/50 font-mono">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[#18122B]/50 font-mono">
                 ₹
               </span>
               <input
@@ -1261,7 +1541,7 @@ export function TransactionsTable({ token }: { token: string }) {
                 required
                 value={form.amount}
                 onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                className="w-full rounded-xl border border-[#DDD9CF] bg-white pl-7 pr-3 py-2 text-xs font-mono font-bold text-[#18122B] placeholder:text-[#18122B]/40 focus:border-[#18122B] focus:outline-none"
+                className="w-full rounded-xl border border-[#DDD9CF] bg-white pl-6 pr-2 py-1.5 text-xs font-mono font-bold text-[#18122B] placeholder:text-[#18122B]/40 focus:border-[#18122B] focus:outline-none"
               />
             </div>
 
@@ -1269,11 +1549,11 @@ export function TransactionsTable({ token }: { token: string }) {
             <div className="sm:col-span-4">
               <input
                 type="text"
-                placeholder="What did you spend on? (e.g. Dinner, Rent, Fuel)"
+                placeholder="What did you spend on? (e.g. Dinner, Fuel, Rent)"
                 required
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
-                className="w-full rounded-xl border border-[#DDD9CF] bg-white px-3 py-2 text-xs font-medium text-[#18122B] placeholder:text-[#18122B]/40 focus:border-[#18122B] focus:outline-none"
+                className="w-full rounded-xl border border-[#DDD9CF] bg-white px-3 py-1.5 text-xs font-medium text-[#18122B] placeholder:text-[#18122B]/40 focus:border-[#18122B] focus:outline-none"
               />
             </div>
 
@@ -1282,7 +1562,7 @@ export function TransactionsTable({ token }: { token: string }) {
               <select
                 value={form.category}
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
-                className="w-full rounded-xl border border-[#DDD9CF] bg-white px-3 py-2 text-xs font-medium text-[#18122B] focus:border-[#18122B] focus:outline-none cursor-pointer"
+                className="w-full rounded-xl border border-[#DDD9CF] bg-white px-2.5 py-1.5 text-xs font-medium text-[#18122B] focus:border-[#18122B] focus:outline-none cursor-pointer"
               >
                 <option value="Food & Dining">🍽️ Food & Dining</option>
                 <option value="Groceries">🛒 Groceries</option>
@@ -1303,7 +1583,7 @@ export function TransactionsTable({ token }: { token: string }) {
                 type="date"
                 value={form.date}
                 onChange={(e) => setForm({ ...form, date: e.target.value })}
-                className="w-full rounded-xl border border-[#DDD9CF] bg-white px-3 py-2 text-xs font-medium text-[#18122B] focus:border-[#18122B] focus:outline-none"
+                className="w-full rounded-xl border border-[#DDD9CF] bg-white px-2 py-1.5 text-xs font-medium text-[#18122B] focus:border-[#18122B] focus:outline-none"
               />
             </div>
 
@@ -1312,7 +1592,7 @@ export function TransactionsTable({ token }: { token: string }) {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full rounded-xl bg-[#2d5016] hover:bg-[#234011] text-white py-2 px-3 text-xs font-bold transition flex items-center justify-center gap-1 shadow-sm disabled:opacity-50 cursor-pointer"
+                className="w-full rounded-xl bg-[#2d5016] hover:bg-[#234011] text-white py-1.5 px-2 text-xs font-bold transition flex items-center justify-center gap-1 shadow-xs disabled:opacity-50 cursor-pointer"
               >
                 {isSubmitting ? "..." : <span>Record →</span>}
               </button>
@@ -1322,7 +1602,7 @@ export function TransactionsTable({ token }: { token: string }) {
 
         {/* Tab 2: Bank SMS Quick Add */}
         {activeTab === "pasteSms" && (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {!smsDraft ? (
               <div className="flex flex-col sm:flex-row gap-2">
                 <textarea
@@ -1334,20 +1614,19 @@ export function TransactionsTable({ token }: { token: string }) {
                   }}
                   rows={2}
                   placeholder="Paste bank/UPI debit alert SMS (e.g., 'Rs 450 debited at Zomato on 03-Oct-26...')"
-                  className="flex-1 rounded-xl border border-[#DDD9CF] bg-white p-2.5 text-xs font-mono text-[#18122B] placeholder:text-[#18122B]/40 focus:border-[#18122B] focus:outline-none"
+                  className="flex-1 rounded-xl border border-[#DDD9CF] bg-white p-2 text-xs font-mono text-[#18122B] placeholder:text-[#18122B]/40 focus:border-[#18122B] focus:outline-none"
                 />
                 <button
                   type="button"
                   onClick={handleParseSms}
                   disabled={isParsingSms || !smsText.trim()}
-                  className="sm:w-36 rounded-xl bg-[#2d5016] hover:bg-[#234011] text-white py-2 px-3 text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+                  className="sm:w-32 rounded-xl bg-[#2d5016] hover:bg-[#234011] text-white py-1.5 px-3 text-xs font-bold transition flex items-center justify-center gap-1 shadow-xs disabled:opacity-50 cursor-pointer"
                 >
                   {isParsingSms ? "Parsing..." : "Parse SMS →"}
                 </button>
               </div>
             ) : (
-              /* Review Draft Before Commit */
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-2.5 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-emerald-900 flex items-center gap-1">
                     <span>✓</span> Review Parsed SMS Transaction
@@ -1420,17 +1699,108 @@ export function TransactionsTable({ token }: { token: string }) {
                     type="button"
                     onClick={handleConfirmSms}
                     disabled={isConfirmingSms}
-                    className="rounded-lg bg-[#2d5016] hover:bg-[#234011] text-white px-4 py-1 text-xs font-bold transition flex items-center gap-1 shadow-sm disabled:opacity-50"
+                    className="rounded-lg bg-[#2d5016] hover:bg-[#234011] text-white px-3 py-1 text-xs font-bold transition flex items-center gap-1 shadow-xs disabled:opacity-50"
                   >
-                    {isConfirmingSms ? "Saving..." : "Confirm & Save Transaction →"}
+                    {isConfirmingSms ? "Saving..." : "Confirm & Save →"}
                   </button>
                 </div>
               </div>
             )}
 
             {smsError && (
-              <p className="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2">
+              <p className="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-1.5">
                 ⚠️ {smsError}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Tab 3: Quick Document Upload Dropzone */}
+        {activeTab === "uploadDoc" && (
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragOver(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setIsDragOver(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragOver(false);
+              if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                setDocFile(e.dataTransfer.files[0]);
+                setUploadDocError(null);
+              }
+            }}
+            className={`rounded-xl border-2 border-dashed p-3 transition flex flex-col sm:flex-row items-center justify-between gap-3 ${
+              isDragOver
+                ? "border-lime-500 bg-lime-50/50"
+                : "border-stone-300/80 bg-white"
+            }`}
+          >
+            <input
+              ref={docFileInputRef}
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg,.csv"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  setDocFile(e.target.files[0]);
+                  setUploadDocError(null);
+                }
+              }}
+              className="hidden"
+            />
+
+            <div className="flex items-center gap-2.5">
+              <span className="text-xl p-1.5 rounded-lg bg-lime-100 text-lime-800">
+                ✦
+              </span>
+              <div>
+                <p className="font-serif text-xs sm:text-sm font-bold text-[#18122B]">
+                  {docFile ? docFile.name : "DROP FINANCIAL DOCUMENT OR CHOOSE FILE"}
+                </p>
+                <p className="text-[10px] text-stone-500">
+                  {docFile
+                    ? `${(docFile.size / 1024).toFixed(1)} KB · Ready to deposit`
+                    : "Receipts, statements, invoices (PDF, JPG, PNG, CSV)"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={docType}
+                onChange={(e) => setDocType(e.target.value)}
+                className="rounded-lg border border-[#DDD9CF] bg-white px-2 py-1 text-xs font-semibold text-[#18122B]"
+              >
+                <option value="receipt">Receipt</option>
+                <option value="bank_statement">Bank Statement</option>
+                <option value="other">Other Document</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={() => docFileInputRef.current?.click()}
+                className="rounded-lg border border-[#DDD9CF] bg-white px-3 py-1 text-xs font-bold text-stone-700 hover:bg-stone-50 transition"
+              >
+                Choose file
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDocUpload}
+                disabled={!docFile || uploadingDoc}
+                className="rounded-lg bg-[#18122B] px-3.5 py-1 text-xs font-bold text-white shadow-xs hover:bg-stone-800 disabled:opacity-40 transition"
+              >
+                {uploadingDoc ? "Scanning…" : "Deposit to Vault →"}
+              </button>
+            </div>
+
+            {uploadDocError && (
+              <p className="w-full text-xs font-semibold text-rose-700">
+                ⚠ {uploadDocError}
               </p>
             )}
           </div>
@@ -1438,336 +1808,499 @@ export function TransactionsTable({ token }: { token: string }) {
       </div>
 
       {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          4. SEARCH + FILTER TOOLBAR
-      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-      <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-2.5 sm:p-3 shadow-2xs mb-4 flex flex-wrap items-center justify-between gap-2">
-        {/* Search Input */}
-        <div className="relative flex-1 min-w-[200px]">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-[#18122B]/40">
-            🔍
-          </span>
-          <input
-            type="text"
-            placeholder="Search transactions, merchant, category..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-xl border border-[#DDD9CF] bg-white pl-8 pr-3 py-1.5 text-xs text-[#18122B] placeholder:text-[#18122B]/40 focus:border-[#18122B] focus:outline-none"
-          />
-        </div>
-
-        {/* Filter Dropdowns */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {/* Category Filter */}
-          <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-            className="rounded-xl border border-[#DDD9CF] bg-white px-2.5 py-1.5 text-xs font-bold text-[#18122B]/80 focus:border-[#18122B] focus:outline-none cursor-pointer"
-          >
-            <option value="All">All Categories ▾</option>
-            <option value="Food & Dining">Food & Dining</option>
-            <option value="Groceries">Groceries</option>
-            <option value="Entertainment">Entertainment</option>
-            <option value="Shopping">Shopping</option>
-            <option value="Rent">Rent</option>
-            <option value="Utilities">Utilities</option>
-            <option value="Travel">Travel</option>
-            <option value="Healthcare">Healthcare</option>
-            <option value="General">General</option>
-          </select>
-
-          {/* Date Filter */}
-          <select
-            value={selectedDateFilter}
-            onChange={(e) => setSelectedDateFilter(e.target.value)}
-            className="rounded-xl border border-[#DDD9CF] bg-white px-2.5 py-1.5 text-xs font-bold text-[#18122B]/80 focus:border-[#18122B] focus:outline-none cursor-pointer"
-          >
-            <option value="All">All Dates ▾</option>
-            <option value="thisMonth">This Month</option>
-            <option value="lastMonth">Last Month</option>
-            <option value="last30Days">Last 30 Days</option>
-            <option value="thisYear">This Year</option>
-          </select>
-
-          {/* Amount Filter */}
-          <select
-            value={selectedAmountRange}
-            onChange={(e) => setSelectedAmountRange(e.target.value)}
-            className="rounded-xl border border-[#DDD9CF] bg-white px-2.5 py-1.5 text-xs font-bold text-[#18122B]/80 focus:border-[#18122B] focus:outline-none cursor-pointer"
-          >
-            <option value="All">All Amounts ▾</option>
-            <option value="under500">Under ₹500</option>
-            <option value="500to2000">₹500 – ₹2,000</option>
-            <option value="2000to10000">₹2,000 – ₹10,000</option>
-            <option value="above10000">Above ₹10,000</option>
-          </select>
-
-          {/* Sort By */}
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
-            className="rounded-xl border border-[#DDD9CF] bg-white px-2.5 py-1.5 text-xs font-bold text-[#18122B]/80 focus:border-[#18122B] focus:outline-none cursor-pointer"
-          >
-            <option value="latest">Latest First ▾</option>
-            <option value="oldest">Oldest First</option>
-            <option value="highest">Highest Amount</option>
-            <option value="lowest">Lowest Amount</option>
-          </select>
-
-          {/* Export CSV Button */}
-          <button
-            type="button"
-            onClick={handleExportCsv}
-            className="flex items-center gap-1.5 rounded-xl border border-[#DDD9CF] bg-white px-3 py-1.5 text-xs font-bold text-[#18122B] hover:bg-[#FAF6ED] transition cursor-pointer"
-          >
-            <span>📥</span>
-            <span>Export CSV</span>
-          </button>
-
-          {/* Hidden CSV file upload */}
-          <input
-            ref={csvInputRef}
-            type="file"
-            accept=".csv"
-            onChange={handleCsvUpload}
-            className="hidden"
-          />
-        </div>
-      </div>
-
-      {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          5. TWO-COLUMN MAIN CONTENT AREA
+          4. MAIN TWO-COLUMN WORKSPACE
       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        {/* LEFT COLUMN: RECENT TRANSACTIONS (Approx 62% width -> 7.5/12 or 7/12 cols) */}
-        <div className="lg:col-span-7 rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs">
-          <div className="flex items-center justify-between pb-3 border-b border-[#E5DAC4]/60 mb-2">
-            <div className="flex items-center gap-2">
-              <h2 className="font-serif text-sm sm:text-base font-bold uppercase tracking-tight text-[#18122B]">
-                RECENT TRANSACTIONS
-              </h2>
-              <span className="rounded-full bg-[#18122B]/10 px-2 py-0.5 text-[10px] font-bold text-[#18122B]">
-                {filteredItems.length} transactions
+        {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            LEFT / PRIMARY COLUMN (Col-7 or Col-8 on desktop)
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+        <div className="lg:col-span-7 space-y-4">
+          {/* SEARCH & FILTERS TOOLBAR */}
+          <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-2.5 shadow-2xs flex flex-wrap items-center justify-between gap-2">
+            {/* Search Input */}
+            <div className="relative flex-1 min-w-[180px]">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-[#18122B]/40">
+                🔍
               </span>
+              <input
+                type="text"
+                placeholder="Search transactions, receipts, categories..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full rounded-xl border border-[#DDD9CF] bg-white pl-7 pr-2 py-1.5 text-xs text-[#18122B] placeholder:text-[#18122B]/40 focus:border-[#18122B] focus:outline-none"
+              />
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold text-[#18122B]/70">
-                View all →
-              </span>
+            {/* Filter Dropdowns */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {viewMode === "transactions" && (
+                <>
+                  <select
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    className="rounded-xl border border-[#DDD9CF] bg-white px-2 py-1.5 text-xs font-bold text-[#18122B]/80 focus:border-[#18122B] focus:outline-none cursor-pointer"
+                  >
+                    <option value="All">All Categories ▾</option>
+                    <option value="Food & Dining">Food & Dining</option>
+                    <option value="Groceries">Groceries</option>
+                    <option value="Entertainment">Entertainment</option>
+                    <option value="Shopping">Shopping</option>
+                    <option value="Rent">Rent</option>
+                    <option value="Utilities">Utilities</option>
+                    <option value="Travel">Travel</option>
+                    <option value="Healthcare">Healthcare</option>
+                    <option value="General">General</option>
+                  </select>
+
+                  <select
+                    value={selectedDateFilter}
+                    onChange={(e) => setSelectedDateFilter(e.target.value)}
+                    className="rounded-xl border border-[#DDD9CF] bg-white px-2 py-1.5 text-xs font-bold text-[#18122B]/80 focus:border-[#18122B] focus:outline-none cursor-pointer"
+                  >
+                    <option value="All">All Dates ▾</option>
+                    <option value="thisMonth">This Month</option>
+                    <option value="lastMonth">Last Month</option>
+                    <option value="last30Days">Last 30 Days</option>
+                    <option value="thisYear">This Year</option>
+                  </select>
+
+                  <select
+                    value={selectedAmountRange}
+                    onChange={(e) => setSelectedAmountRange(e.target.value)}
+                    className="rounded-xl border border-[#DDD9CF] bg-white px-2 py-1.5 text-xs font-bold text-[#18122B]/80 focus:border-[#18122B] focus:outline-none cursor-pointer"
+                  >
+                    <option value="All">All Amounts ▾</option>
+                    <option value="under500">Under ₹500</option>
+                    <option value="500to2000">₹500 – ₹2,000</option>
+                    <option value="2000to10000">₹2,000 – ₹10,000</option>
+                    <option value="above10000">Above ₹10,000</option>
+                  </select>
+
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as any)}
+                    className="rounded-xl border border-[#DDD9CF] bg-white px-2 py-1.5 text-xs font-bold text-[#18122B]/80 focus:border-[#18122B] focus:outline-none cursor-pointer"
+                  >
+                    <option value="latest">Latest First ▾</option>
+                    <option value="oldest">Oldest First</option>
+                    <option value="highest">Highest Amount</option>
+                    <option value="lowest">Lowest Amount</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={handleExportCsv}
+                    className="flex items-center gap-1 rounded-xl border border-[#DDD9CF] bg-white px-2.5 py-1.5 text-xs font-bold text-[#18122B] hover:bg-[#FAF6ED] transition cursor-pointer"
+                  >
+                    <span>📥</span>
+                    <span>Export</span>
+                  </button>
+                </>
+              )}
+
+              {viewMode === "documents" && (
+                <div className="flex items-center gap-1">
+                  {(["all", "receipt", "bank_statement", "other"] as const).map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setVaultFilter(cat)}
+                      className={`rounded-xl px-2.5 py-1 text-xs font-bold capitalize transition ${
+                        vaultFilter === cat
+                          ? "bg-[#18122B] text-white"
+                          : "border border-[#DDD9CF] bg-white text-[#18122B]/70 hover:text-[#18122B]"
+                      }`}
+                    >
+                      {cat.replace("_", " ")}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Hidden CSV file upload */}
+              <input
+                ref={csvInputRef}
+                type="file"
+                accept=".csv"
+                onChange={handleCsvUpload}
+                className="hidden"
+              />
             </div>
           </div>
 
-          {/* Transaction Row List */}
-          {loading ? (
-            <div className="py-12 text-center text-xs font-bold text-[#18122B]/50 animate-pulse">
-              Loading transactions...
-            </div>
-          ) : filteredItems.length === 0 ? (
-            <div className="py-12 text-center text-xs font-medium text-[#18122B]/50">
-              No transactions match the selected filters.
-            </div>
-          ) : (
-            <div className="divide-y divide-[#E5DAC4]/40">
-              {filteredItems.map((item) => {
-                const meta = getCategoryMeta(item.category);
-                const merchantMeta = getMerchantMeta(item.description, item.category);
+          {/* VIEW: TRANSACTIONS LIST */}
+          {viewMode === "transactions" && (
+            <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs">
+              <div className="flex items-center justify-between pb-2.5 border-b border-[#E5DAC4]/60 mb-2">
+                <div className="flex items-center gap-2">
+                  <h2 className="font-serif text-xs sm:text-sm font-bold uppercase tracking-tight text-[#18122B]">
+                    RECENT TRANSACTIONS
+                  </h2>
+                  <span className="rounded-full bg-[#18122B]/10 px-2 py-0.5 text-[10px] font-bold text-[#18122B]">
+                    {filteredItems.length} records
+                  </span>
+                </div>
 
-                return (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between py-2.5 px-1 hover:bg-[#FAF6ED]/60 rounded-xl transition group relative"
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => csvInputRef.current?.click()}
+                    disabled={importingCsv}
+                    className="text-[11px] font-bold text-[#18122B]/70 hover:text-[#18122B] transition"
                   >
-                    {/* Left: Icon + Title + Metadata */}
-                    <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
+                    {importingCsv ? "Importing..." : "+ Import CSV"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Transaction Row List */}
+              {loading ? (
+                <div className="py-12 text-center text-xs font-bold text-[#18122B]/50 animate-pulse">
+                  Loading transactions...
+                </div>
+              ) : filteredItems.length === 0 ? (
+                <div className="py-12 text-center text-xs font-medium text-[#18122B]/50">
+                  No transactions match the selected filters.
+                </div>
+              ) : (
+                <div className="divide-y divide-[#E5DAC4]/40">
+                  {filteredItems.map((item) => {
+                    const meta = getCategoryMeta(item.category);
+                    const merchantMeta = getMerchantMeta(item.description, item.category);
+                    const isDocAttached = Boolean(
+                      item.documentId ||
+                      item.source === "ocr" ||
+                      item.source === "document" ||
+                      item.source === "bank_statement"
+                    );
+
+                    return (
                       <div
-                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#DDD9CF]/60 text-xs shadow-2xs ${merchantMeta.bg}`}
+                        key={item.id}
+                        className="flex items-center justify-between py-2 px-1 hover:bg-[#FAF6ED]/60 rounded-xl transition group relative"
                       >
-                        {merchantMeta.icon}
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <p className="font-bold text-xs sm:text-sm text-[#18122B] truncate capitalize">
-                          {item.description}
-                        </p>
-                        <p className="text-[10px] text-[#18122B]/50 font-medium">
-                          {formatDate(item.transactionDate)} •{" "}
-                          <span className="uppercase text-[9px] font-bold tracking-wider">
-                            {item.source || "MANUAL"}
-                          </span>
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Middle: Category Pill */}
-                    <div className="hidden sm:flex items-center shrink-0 pr-3">
-                      <span
-                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold border ${meta.bg} ${meta.border} ${meta.text}`}
-                      >
-                        <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
-                        <span>{item.category}</span>
-                      </span>
-                    </div>
-
-                    {/* Right: Amount & Actions */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="font-mono text-xs sm:text-sm font-black text-[#18122B] whitespace-nowrap">
-                        - {formatINR(item.amount)}
-                      </span>
-
-                      {/* Action Menu */}
-                      <div className="relative" data-action-menu>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setActiveMenuId(activeMenuId === item.id ? null : item.id)
-                          }
-                          className="flex h-7 w-7 items-center justify-center rounded-lg text-[#18122B]/40 hover:text-[#18122B] hover:bg-[#FAF6ED] transition"
-                        >
-                          •••
-                        </button>
-
-                        {activeMenuId === item.id && (
-                          <div className="absolute right-0 mt-1 w-32 rounded-xl border border-[#E5DAC4] bg-[#FFFDF8] p-1 shadow-lg z-30 animate-fade-in">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEdit(item)}
-                              className="w-full text-left px-2 py-1 text-[11px] font-bold text-[#18122B]/80 hover:bg-[#FAF6ED] rounded-lg transition"
-                            >
-                              ✏️ Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleOpenDelete(item)}
-                              className="w-full text-left px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-50 rounded-lg transition"
-                            >
-                              🗑️ Delete
-                            </button>
+                        {/* Left: Icon + Title + Metadata */}
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
+                          <div
+                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[#DDD9CF]/60 text-xs shadow-2xs ${merchantMeta.bg}`}
+                          >
+                            {merchantMeta.icon}
                           </div>
-                        )}
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <p className="font-bold text-xs sm:text-sm text-[#18122B] truncate capitalize">
+                                {item.description}
+                              </p>
+                              {isDocAttached && (
+                                <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.2 text-[9px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
+                                  🧾 Receipt
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-[#18122B]/50 font-medium">
+                              {formatDate(item.transactionDate)} •{" "}
+                              <span className="uppercase text-[9px] font-bold tracking-wider">
+                                {item.source || "MANUAL"}
+                              </span>
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Middle: Category Pill */}
+                        <div className="hidden sm:flex items-center shrink-0 pr-3">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold border ${meta.bg} ${meta.border} ${meta.text}`}
+                          >
+                            <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+                            <span>{item.category}</span>
+                          </span>
+                        </div>
+
+                        {/* Right: Amount & Actions */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="font-mono text-xs sm:text-sm font-black text-[#18122B] whitespace-nowrap">
+                            - {formatINR(item.amount)}
+                          </span>
+
+                          {/* Action Menu */}
+                          <div className="relative" data-action-menu>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setActiveMenuId(activeMenuId === item.id ? null : item.id)
+                              }
+                              className="flex h-6 w-6 items-center justify-center rounded-lg text-[#18122B]/40 hover:text-[#18122B] hover:bg-[#FAF6ED] transition"
+                            >
+                              •••
+                            </button>
+
+                            {activeMenuId === item.id && (
+                              <div className="absolute right-0 mt-1 w-28 rounded-xl border border-[#E5DAC4] bg-[#FFFDF8] p-1 shadow-lg z-30 animate-fade-in">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEdit(item)}
+                                  className="w-full text-left px-2 py-1 text-[11px] font-bold text-[#18122B]/80 hover:bg-[#FAF6ED] rounded-lg transition"
+                                >
+                                  ✏️ Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenDelete(item)}
+                                  className="w-full text-left px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-50 rounded-lg transition"
+                                >
+                                  🗑️ Delete
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VIEW: DOCUMENTS GRID */}
+          {viewMode === "documents" && (
+            <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs">
+              <div className="flex items-center justify-between pb-2.5 border-b border-[#E5DAC4]/60 mb-3">
+                <div className="flex items-center gap-2">
+                  <h2 className="font-serif text-xs sm:text-sm font-bold uppercase tracking-tight text-[#18122B]">
+                    VAULT DOCUMENTS ({filteredDocuments.length})
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => loadDocumentsList()}
+                  className="text-[11px] font-bold text-[#18122B]/70 hover:text-[#18122B]"
+                >
+                  ↻ Refresh Vault
+                </button>
+              </div>
+
+              {loadingDocs ? (
+                <div className="py-12 text-center text-xs font-bold text-[#18122B]/50 animate-pulse">
+                  Retrieving vault records…
+                </div>
+              ) : filteredDocuments.length === 0 ? (
+                <div className="py-10 text-center">
+                  <p className="font-serif text-base font-bold text-[#18122B]">
+                    No documents found in this category.
+                  </p>
+                  <p className="text-xs text-[#18122B]/50 mt-1">
+                    Upload a receipt or statement to auto-extract expenses into your ledger.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {filteredDocuments.map((d) => {
+                    const iconInfo = getDocIcon(d.docType, d.title);
+                    const formattedDate = formatDate(d.uploadedAt);
+                    const confPct = d.confidence != null ? Math.round(d.confidence * 100) : null;
+
+                    return (
+                      <div
+                        key={d.id}
+                        onClick={() => handleOpenDocReview(d)}
+                        className="flex flex-col justify-between rounded-xl border border-[#E5DAC4]/80 bg-white p-3.5 shadow-2xs hover:shadow-md hover:border-[#18122B]/30 transition cursor-pointer"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1.5 mb-2">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-base p-1 rounded-md bg-stone-100">
+                                {iconInfo.icon}
+                              </span>
+                              <span className="text-[9px] font-bold uppercase tracking-wider text-stone-400">
+                                {iconInfo.badge}
+                              </span>
+                            </div>
+                            <span className="text-[9px] font-semibold text-stone-400">
+                              {formattedDate}
+                            </span>
+                          </div>
+
+                          <p className="font-bold text-xs text-[#18122B] truncate font-mono">
+                            {d.title}
+                          </p>
+
+                          <div className="mt-2 flex items-center justify-between">
+                            {renderDocStatus(d.status)}
+                            {confPct !== null && (
+                              <span className="text-[10px] font-bold text-stone-600 font-mono">
+                                {confPct}% Conf.
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="mt-3 pt-2 border-t border-[#E5DAC4]/40 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenDocReview(d);
+                            }}
+                            className="text-[11px] font-bold text-[#18122B] hover:text-[#2d5016]"
+                          >
+                            {d.status === "NEEDS_REVIEW" ? "Review Extractions →" : "View Entries →"}
+                          </button>
+
+                          {confirmDeleteDocId === d.id ? (
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteDoc(d.id, e)}
+                              disabled={isDeletingDoc}
+                              className="rounded bg-rose-600 text-white text-[10px] font-bold px-2 py-0.5"
+                            >
+                              Confirm Delete
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteDoc(d.id, e)}
+                              className="text-stone-400 hover:text-rose-600 text-xs"
+                              title="Delete document"
+                            >
+                              🗑️
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VIEW: ALL COMBINED ACTIVITY */}
+          {viewMode === "all" && (
+            <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs">
+              <div className="flex items-center justify-between pb-2.5 border-b border-[#E5DAC4]/60 mb-2">
+                <h2 className="font-serif text-xs sm:text-sm font-bold uppercase tracking-tight text-[#18122B]">
+                  ALL FINANCIAL & VAULT ACTIVITY ({combinedActivity.length})
+                </h2>
+              </div>
+
+              {combinedActivity.length === 0 ? (
+                <div className="py-12 text-center text-xs font-medium text-[#18122B]/50">
+                  No activity recorded yet.
+                </div>
+              ) : (
+                <div className="divide-y divide-[#E5DAC4]/40">
+                  {combinedActivity.map((evt) => (
+                    <div
+                      key={evt.id}
+                      className="flex items-center justify-between py-2 px-1 hover:bg-[#FAF6ED]/60 rounded-xl transition"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
+                        <span className="text-lg">
+                          {evt.type === "transaction" ? "💳" : "📁"}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold text-xs sm:text-sm text-[#18122B] truncate capitalize">
+                            {evt.title}
+                          </p>
+                          <p className="text-[10px] text-[#18122B]/50 font-medium">
+                            {formatDate(evt.date)} • {evt.subtitle}
+                          </p>
+                        </div>
+                      </div>
+
+                      {evt.amount !== null && (
+                        <span className="font-mono text-xs sm:text-sm font-black text-[#18122B]">
+                          - {formatINR(evt.amount)}
+                        </span>
+                      )}
                     </div>
-                  </div>
-                );
-              })}
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* RIGHT COLUMN: 3 ANALYTICAL CARDS (Approx 38% width -> 5/12 cols) */}
+        {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            RIGHT / CONTEXTUAL SIDEBAR (Col-5 or Col-4 on desktop)
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
         <div className="lg:col-span-5 space-y-4">
-          {/* 1. SPENDING BREAKDOWN */}
+          {/* 1. DOCUMENT VAULT CONTEXTUAL PANEL */}
           <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs">
-            <div className="flex items-center justify-between pb-2 border-b border-[#E5DAC4]/60 mb-3">
+            <div className="flex items-center justify-between pb-2 border-b border-[#E5DAC4]/60 mb-2.5">
               <div className="flex items-center gap-1.5">
-                <span className="text-amber-600 text-xs">💡</span>
+                <span className="text-xs">📁</span>
                 <h3 className="font-serif text-xs sm:text-sm font-bold uppercase tracking-tight text-[#18122B]">
-                  SPENDING BREAKDOWN
+                  DOCUMENT VAULT
                 </h3>
               </div>
-              <select
-                value={breakdownTimeframe}
-                onChange={(e) => setBreakdownTimeframe(e.target.value as any)}
-                className="rounded-lg border border-[#DDD9CF] bg-white px-2 py-0.5 text-[10px] font-bold text-[#18122B]/80 focus:outline-none cursor-pointer"
+              <button
+                type="button"
+                onClick={() => setViewMode("documents")}
+                className="text-[11px] font-bold text-[#18122B]/70 hover:text-[#18122B]"
               >
-                <option value="thisMonth">This month ▾</option>
-                <option value="all">All time ▾</option>
-              </select>
+                Expand Vault →
+              </button>
             </div>
 
-            <div className="flex items-center justify-between gap-4">
-              {/* SVG Ring Donut */}
-              <DonutChart
-                categories={spendingBreakdown.categories}
-                total={spendingBreakdown.total}
-              />
-
-              {/* Dynamic Category Legend */}
-              <div className="flex-1 space-y-1.5 text-xs">
-                {spendingBreakdown.categories.map((cat, i) => (
-                  <div key={i} className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 min-w-0 pr-2">
-                      <span
-                        className="h-2 w-2 rounded-full shrink-0"
-                        style={{ backgroundColor: cat.color }}
-                      />
-                      <span className="font-medium text-[#18122B]/80 truncate text-[11px]">
-                        {cat.name}
-                      </span>
-                    </div>
-                    <span className="font-mono text-[11px] font-bold text-[#18122B] shrink-0">
-                      {cat.pct}%
-                    </span>
-                  </div>
-                ))}
+            {/* Compact Vault Document List */}
+            {loadingDocs ? (
+              <div className="py-4 text-center text-xs font-medium text-[#18122B]/50 animate-pulse">
+                Checking vault files...
               </div>
-            </div>
-          </div>
-
-          {/* 2. TOP MERCHANTS */}
-          <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs">
-            <div className="flex items-center justify-between pb-2 border-b border-[#E5DAC4]/60 mb-3">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs">🥷</span>
-                <h3 className="font-serif text-xs sm:text-sm font-bold uppercase tracking-tight text-[#18122B]">
-                  TOP MERCHANTS
-                </h3>
+            ) : documents.length === 0 ? (
+              <div className="py-4 text-center">
+                <p className="text-xs font-medium text-[#18122B]/60">
+                  No documents in vault yet.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("uploadDoc")}
+                  className="mt-2 text-[11px] font-bold text-[#2d5016] underline"
+                >
+                  + Upload first receipt
+                </button>
               </div>
-              <select
-                value={merchantsTimeframe}
-                onChange={(e) => setMerchantsTimeframe(e.target.value as any)}
-                className="rounded-lg border border-[#DDD9CF] bg-white px-2 py-0.5 text-[10px] font-bold text-[#18122B]/80 focus:outline-none cursor-pointer"
-              >
-                <option value="thisMonth">This month ▾</option>
-                <option value="all">All time ▾</option>
-              </select>
-            </div>
-
-            {topMerchants.length === 0 ? (
-              <p className="text-xs text-[#18122B]/50 font-medium py-3 text-center">
-                No merchant spending recorded yet.
-              </p>
             ) : (
-              <div className="space-y-2.5">
-                {topMerchants.map((m, i) => (
-                  <div key={i} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
-                        <div
-                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-[#DDD9CF]/60 text-[10px] ${m.meta.bg}`}
-                        >
-                          {m.meta.icon}
+              <div className="space-y-2">
+                {documents.slice(0, 4).map((d) => {
+                  const info = getDocIcon(d.docType, d.title);
+                  return (
+                    <div
+                      key={d.id}
+                      onClick={() => handleOpenDocReview(d)}
+                      className="flex items-center justify-between gap-2 p-2 rounded-xl bg-[#FAF6ED]/70 border border-[#E5DAC4]/60 hover:bg-[#FAF6ED] transition cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span className="text-base">{info.icon}</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] font-bold text-[#18122B] truncate font-mono">
+                            {d.title}
+                          </p>
+                          <p className="text-[9px] text-stone-500">
+                            {formatDate(d.uploadedAt)} • {info.badge}
+                          </p>
                         </div>
-                        <span className="font-bold text-[#18122B] text-xs truncate">
-                          {m.name}
-                        </span>
                       </div>
-                      <div className="flex items-center gap-2 font-mono text-xs">
-                        <span className="font-bold text-[#18122B]">{formatINR(m.total)}</span>
-                        <span className="text-[#18122B]/50 text-[10px] w-6 text-right">
-                          {m.pct}%
-                        </span>
+                      <div className="shrink-0">
+                        {renderDocStatus(d.status)}
                       </div>
                     </div>
-                    {/* Progress Bar */}
-                    <div className="h-1.5 w-full rounded-full bg-[#E5DAC4]/40 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-[#8b5cf6] transition-all duration-300"
-                        style={{ width: `${Math.max(4, m.pct)}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
 
-          {/* 3. SPENDING INSIGHTS (With Owl Mascot #2) */}
+          {/* 2. AI DOCUMENT INSIGHTS (With subtle Owl Mascot anchor) */}
           <div className="relative rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs overflow-hidden">
-            <div className="flex items-center justify-between pb-2 border-b border-[#E5DAC4]/60 mb-3">
+            <div className="flex items-center justify-between pb-2 border-b border-[#E5DAC4]/60 mb-2.5">
               <div className="flex items-center gap-1.5">
                 <span className="text-amber-500 text-xs">💡</span>
                 <h3 className="font-serif text-xs sm:text-sm font-bold uppercase tracking-tight text-[#18122B]">
-                  SPENDING INSIGHTS
+                  AI SPENDING & VAULT INSIGHTS
                 </h3>
               </div>
               <button
@@ -1782,25 +2315,25 @@ export function TransactionsTable({ token }: { token: string }) {
 
             {/* Real AI Insights List */}
             {loadingInsights ? (
-              <div className="py-6 text-center text-xs font-medium text-[#18122B]/50 animate-pulse">
-                Analyzing spending patterns...
+              <div className="py-5 text-center text-xs font-medium text-[#18122B]/50 animate-pulse">
+                Analyzing spending patterns & receipts...
               </div>
             ) : insights.length === 0 ? (
-              <div className="py-4 text-left">
+              <div className="py-3 text-left">
                 <p className="text-xs font-medium text-[#18122B]/60">
-                  No spending anomalies detected. All accounts looking healthy!
+                  No spending anomalies detected. All ledger records & receipts look balanced!
                 </p>
               </div>
             ) : (
-              <div className="space-y-2 pr-12 sm:pr-16 relative z-10">
+              <div className="space-y-2 pr-10 sm:pr-14 relative z-10">
                 {insights.slice(0, 2).map((ins, idx) => (
                   <div
                     key={ins.id || idx}
-                    className="flex items-center justify-between gap-2 p-2 rounded-xl bg-[#FAF6ED]/70 border border-[#E5DAC4]/60 hover:bg-[#FAF6ED] transition cursor-pointer"
+                    className="flex items-center justify-between gap-2 p-2 rounded-xl bg-[#FAF6ED]/70 border border-[#E5DAC4]/60 hover:bg-[#FAF6ED] transition"
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-purple-100 text-purple-700 text-xs">
-                        🎮
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-purple-100 text-purple-700 text-[10px]">
+                        🧠
                       </span>
                       <div className="min-w-0">
                         <p className="text-[11px] font-bold text-[#18122B] truncate">
@@ -1813,28 +2346,66 @@ export function TransactionsTable({ token }: { token: string }) {
                         )}
                       </div>
                     </div>
-                    <span className="text-xs text-[#18122B]/40 shrink-0">›</span>
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Owl Mascot #2 (Speech bubble: "keeping your money in check!") */}
-            <div className="absolute -bottom-1 -right-1 w-28 sm:w-36 h-20 sm:h-24 pointer-events-none select-none z-0">
+            {/* Owl Mascot #2 Bubble */}
+            <div className="absolute -bottom-1 -right-1 w-24 sm:w-28 h-16 sm:h-20 pointer-events-none select-none z-0">
               <Image
                 src="/owl-insights-bubble.png"
                 alt="FinSage Owl Guard Mascot"
-                width={140}
-                height={100}
-                className="w-auto h-full object-contain drop-shadow-sm ml-auto"
+                width={120}
+                height={80}
+                className="w-auto h-full object-contain drop-shadow-sm ml-auto opacity-90"
               />
+            </div>
+          </div>
+
+          {/* 3. SPENDING BREAKDOWN & TOP MERCHANTS */}
+          <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs">
+            <div className="flex items-center justify-between pb-2 border-b border-[#E5DAC4]/60 mb-2.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs">📊</span>
+                <h3 className="font-serif text-xs sm:text-sm font-bold uppercase tracking-tight text-[#18122B]">
+                  MONTHLY BREAKDOWN
+                </h3>
+              </div>
+              <span className="text-[10px] font-bold text-[#18122B]/60">This month</span>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <DonutChart
+                categories={spendingBreakdown.categories}
+                total={spendingBreakdown.total}
+              />
+
+              <div className="flex-1 space-y-1 text-xs">
+                {spendingBreakdown.categories.map((cat, i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                      <span
+                        className="h-1.5 w-1.5 rounded-full shrink-0"
+                        style={{ backgroundColor: cat.color }}
+                      />
+                      <span className="font-medium text-[#18122B]/80 truncate text-[10px]">
+                        {cat.name}
+                      </span>
+                    </div>
+                    <span className="font-mono text-[10px] font-bold text-[#18122B] shrink-0">
+                      {cat.pct}%
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          MODALS: EDIT & DELETE
+          MODALS: EDIT, DELETE, & DOCUMENT REVIEW
       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
 
       {/* Edit Modal */}
@@ -1950,6 +2521,20 @@ export function TransactionsTable({ token }: { token: string }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Document Review Modal */}
+      {reviewDoc && (
+        <DocumentReviewModal
+          token={token}
+          document={reviewDoc}
+          onClose={() => setReviewDoc(null)}
+          onConfirmed={() => {
+            loadDocumentsList(true);
+            loadTransactions();
+            showToast("Document entries recorded into ledger! ✦");
+          }}
+        />
       )}
     </div>
   );
