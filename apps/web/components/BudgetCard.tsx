@@ -12,6 +12,110 @@ interface VarianceItem {
   remaining: number;
 }
 
+export type BudgetOwlStatus = "HAPPY" | "WATCHFUL" | "ANXIOUS" | "OVER_BUDGET";
+
+export interface BudgetOwlState {
+  status: BudgetOwlStatus;
+  pct: number;
+  label: string;
+  subtext: string;
+  ariaLabel: string;
+  owlImage: string;
+  pillClass: string;
+  barColor: string;
+  badgeColor: string;
+  isOver: boolean;
+}
+
+/**
+ * Reusable dynamic budget owl state calculation based on exact utilization boundaries:
+ * 0%–49.99%   → Cheerful Owl On Track (HAPPY)
+ * 50%–69.99%  → Watch Your Spend Owl (WATCHFUL)
+ * 70%–99.99%  → Anxious Owl with Checklist (BORDERLINE / ANXIOUS)
+ * 100%+       → Angry Owl Over Budget (OVER_BUDGET)
+ */
+export function getBudgetOwlState(spent: number, limit: number): BudgetOwlState {
+  if (limit <= 0) {
+    return {
+      status: "HAPPY",
+      pct: 0,
+      label: "On track!",
+      subtext: "No spending ceiling set",
+      ariaLabel: "Budget status: on track",
+      owlImage: "/owl-budget-happy.png",
+      pillClass: "border-emerald-300 bg-emerald-50 text-emerald-800",
+      barColor: "bg-[#84cc16]",
+      badgeColor: "bg-emerald-100 text-emerald-800",
+      isOver: false,
+    };
+  }
+
+  const rawPct = (spent / limit) * 100;
+  const roundedPct = Math.round(rawPct);
+
+  // STATE 4 — OVER BUDGET (100%+)
+  if (rawPct >= 100) {
+    return {
+      status: "OVER_BUDGET",
+      pct: roundedPct,
+      label: "Over budget!",
+      subtext: "Exceeded monthly limit",
+      ariaLabel: "Budget status: over budget",
+      owlImage: "/owl-budget-angry.png",
+      pillClass: "border-rose-300 bg-rose-50 text-rose-700",
+      barColor: "bg-rose-500",
+      badgeColor: "bg-rose-100 text-rose-800",
+      isOver: true,
+    };
+  }
+
+  // STATE 3 — BORDERLINE / ANXIOUS (70% – 99.99%)
+  if (rawPct >= 70) {
+    return {
+      status: "ANXIOUS",
+      pct: roundedPct,
+      label: "Getting close!",
+      subtext: "Approaching budget ceiling",
+      ariaLabel: "Budget status: approaching limit",
+      owlImage: "/owl-budget-anxious.png",
+      pillClass: "border-orange-300 bg-orange-50 text-orange-800",
+      barColor: "bg-orange-500",
+      badgeColor: "bg-orange-100 text-orange-800",
+      isOver: false,
+    };
+  }
+
+  // STATE 2 — WATCHFUL (50% – 69.99%)
+  if (rawPct >= 50) {
+    return {
+      status: "WATCHFUL",
+      pct: roundedPct,
+      label: "Watch your spend!",
+      subtext: "Spending is picking up",
+      ariaLabel: "Budget status: watch your spending",
+      owlImage: "/owl-budget-watchful.png",
+      pillClass: "border-amber-300 bg-amber-50 text-amber-800",
+      barColor: "bg-amber-500",
+      badgeColor: "bg-amber-100 text-amber-800",
+      isOver: false,
+    };
+  }
+
+  // STATE 1 — HAPPY (0% – 49.99%)
+  return {
+    status: "HAPPY",
+    pct: roundedPct,
+    label: "On track!",
+    subtext: "Healthy safe reserves",
+    ariaLabel: "Budget status: on track",
+    owlImage: "/owl-budget-happy.png",
+    pillClass: "border-emerald-300 bg-emerald-50 text-emerald-800",
+    barColor: "bg-[#84cc16]",
+    badgeColor: "bg-emerald-100 text-emerald-800",
+    isOver: false,
+  };
+}
+
 const CATEGORY_META: Record<
   string,
   { icon: string; name: string; bg: string; border: string; text: string; color: string }
@@ -262,15 +366,18 @@ export function BudgetCard({ token }: { token: string }) {
     const overallPct = totalLimit > 0 ? Math.round((totalSpent / totalLimit) * 100) : 0;
 
     let onTrackCount = 0;
+    let watchfulCount = 0;
     let nearLimitCount = 0;
     let overBudgetCount = 0;
 
     variance.forEach((v) => {
       const pct = v.limit > 0 ? (v.spent / v.limit) * 100 : 0;
-      if (pct > 100) {
+      if (pct >= 100) {
         overBudgetCount++;
-      } else if (pct >= 80) {
+      } else if (pct >= 70) {
         nearLimitCount++;
+      } else if (pct >= 50) {
+        watchfulCount++;
       } else {
         onTrackCount++;
       }
@@ -286,46 +393,13 @@ export function BudgetCard({ token }: { token: string }) {
       remaining,
       overallPct,
       onTrackCount,
+      watchfulCount,
       nearLimitCount,
       overBudgetCount,
       criticalCategory,
       healthyCategory,
     };
   }, [variance]);
-
-  // Derived Status for individual category tiles
-  function getTileStatus(spent: number, limit: number) {
-    const pct = limit > 0 ? Math.round((spent / limit) * 100) : 0;
-
-    if (pct > 100) {
-      return {
-        pct,
-        label: "Over Budget",
-        pillClass: "border-rose-300 bg-rose-50 text-rose-700",
-        barColor: "bg-rose-500",
-        sticker: "⚠️",
-        isOver: true,
-      };
-    }
-    if (pct >= 80) {
-      return {
-        pct,
-        label: "Near Limit",
-        pillClass: "border-amber-300 bg-amber-50 text-amber-800",
-        barColor: "bg-amber-500",
-        sticker: "👀",
-        isOver: false,
-      };
-    }
-    return {
-      pct,
-      label: "On Track",
-      pillClass: "border-emerald-300 bg-emerald-50 text-emerald-800",
-      barColor: "bg-[#84cc16]",
-      sticker: "✨",
-      isOver: false,
-    };
-  }
 
   // Sorted Budget Tiles
   const sortedVariance = useMemo(() => {
@@ -361,13 +435,13 @@ export function BudgetCard({ token }: { token: string }) {
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-100/70 px-2.5 py-0.5 text-[11px] font-bold text-emerald-900 mb-1.5">
               <span>🏷️</span>
-              <span className="tracking-wide uppercase">BUDGETS</span>
+              <span className="tracking-wide uppercase">BUDGETS & SPENDING LIMITS</span>
             </div>
             <h1 className="font-serif text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-[#18122B]">
               Give every rupee a job. <span className="text-amber-500">✦</span>
             </h1>
             <p className="text-xs sm:text-sm text-[#18122B]/60 font-medium mt-0.5">
-              Set monthly category limits, dodge leaks, and fund your milestones.
+              Set monthly category limits, dodge leaks, and watch your companion react to your money habits.
             </p>
           </div>
 
@@ -427,7 +501,7 @@ export function BudgetCard({ token }: { token: string }) {
             <p className="font-mono text-lg sm:text-2xl font-black text-[#18122B]">
               {summaryMetrics.totalCount}
             </p>
-            <div className="flex items-center gap-2 mt-1 text-[11px] font-medium text-[#18122B]/60">
+            <div className="flex items-center gap-1.5 mt-1 text-[11px] font-medium text-[#18122B]/60 flex-wrap">
               <span className="text-emerald-700 font-bold">{summaryMetrics.onTrackCount} on track</span>
               {summaryMetrics.overBudgetCount > 0 ? (
                 <>
@@ -437,7 +511,12 @@ export function BudgetCard({ token }: { token: string }) {
               ) : summaryMetrics.nearLimitCount > 0 ? (
                 <>
                   <span>•</span>
-                  <span className="text-amber-700 font-bold">{summaryMetrics.nearLimitCount} watch</span>
+                  <span className="text-orange-600 font-bold">{summaryMetrics.nearLimitCount} close</span>
+                </>
+              ) : summaryMetrics.watchfulCount > 0 ? (
+                <>
+                  <span>•</span>
+                  <span className="text-amber-700 font-bold">{summaryMetrics.watchfulCount} watch</span>
                 </>
               ) : null}
             </div>
@@ -522,7 +601,7 @@ export function BudgetCard({ token }: { token: string }) {
           3. TWO-COLUMN MAIN CONTENT
       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        {/* LEFT COLUMN: YOUR BUDGETS (Approx 62% width -> 7/12 cols) */}
+        {/* LEFT COLUMN: YOUR BUDGETS WITH DYNAMIC OWL MASCOT (Approx 62% width -> 7/12 cols) */}
         <div className="lg:col-span-7 rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-2xs">
           <div className="flex items-center justify-between pb-3 border-b border-[#E5DAC4]/60 mb-3">
             <div className="flex items-center gap-2">
@@ -576,98 +655,115 @@ export function BudgetCard({ token }: { token: string }) {
             <div className="space-y-3">
               {sortedVariance.map((v) => {
                 const meta = getCategoryMeta(v.category);
-                const status = getTileStatus(v.spent, v.limit);
+                const owlState = getBudgetOwlState(v.spent, v.limit);
                 const remaining = v.limit - v.spent;
                 const progressPct = Math.min(Math.round((v.spent / v.limit) * 100), 100);
 
                 return (
                   <div
                     key={v.category}
-                    className="rounded-xl border border-[#E5DAC4]/80 bg-[#FAF6ED]/40 p-3 sm:p-3.5 hover:bg-[#FAF6ED]/90 hover:border-[#84cc16]/50 transition-all shadow-2xs group relative"
+                    className="rounded-xl border border-[#E5DAC4]/80 bg-[#FAF6ED]/40 p-3 sm:p-3.5 hover:bg-[#FAF6ED]/90 hover:border-[#84cc16]/50 transition-all shadow-2xs group relative overflow-hidden"
                   >
-                    {/* Top Row: Icon + Category Name + Status Pill + Action Buttons */}
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <div
-                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[#DDD9CF]/70 text-sm shadow-2xs ${meta.bg}`}
-                        >
-                          {meta.icon}
-                        </div>
-                        <div className="min-w-0">
-                          <h3 className="font-serif text-xs sm:text-sm font-bold text-[#18122B] truncate">
-                            {meta.name}
-                          </h3>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        {/* Status Pill */}
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${status.pillClass}`}
-                        >
-                          <span>{status.sticker}</span>
-                          <span>{status.label}</span>
-                        </span>
-
-                        {/* Edit & Delete Action Buttons */}
-                        <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenModal(v.category, v.limit)}
-                            className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-white text-[#18122B]/60 hover:text-[#18122B] transition"
-                            title="Edit budget limit"
-                          >
-                            ✏️
-                          </button>
-                          {budgetMap[v.category] && (
-                            <button
-                              type="button"
-                              onClick={() => setDeleteCandidate(v.category)}
-                              className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-rose-50 text-rose-500 transition"
-                              title="Delete budget limit"
+                    <div className="flex items-start justify-between gap-2.5">
+                      {/* Left & Middle Financial Content */}
+                      <div className="flex-1 min-w-0">
+                        {/* Header: Icon + Category Name + Status Pill + Action Buttons */}
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <div
+                              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border border-[#DDD9CF]/70 text-xs shadow-2xs ${meta.bg}`}
                             >
-                              🗑️
-                            </button>
-                          )}
+                              {meta.icon}
+                            </div>
+                            <h3 className="font-serif text-xs sm:text-sm font-bold text-[#18122B] truncate">
+                              {meta.name}
+                            </h3>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {/* Accessible Dynamic Status Pill */}
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${owlState.pillClass}`}
+                              aria-label={owlState.ariaLabel}
+                            >
+                              <span>{owlState.label}</span>
+                            </span>
+
+                            {/* Edit & Delete Action Buttons */}
+                            <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenModal(v.category, v.limit)}
+                                className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-white text-[#18122B]/60 hover:text-[#18122B] transition"
+                                title="Edit budget limit"
+                              >
+                                ✏️
+                              </button>
+                              {budgetMap[v.category] && (
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteCandidate(v.category)}
+                                  className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-rose-50 text-rose-500 transition"
+                                  title="Delete budget limit"
+                                >
+                                  🗑️
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Middle: Progress Bar and Numbers */}
+                        <div className="my-1.5">
+                          <div className="flex items-center justify-between text-[11px] font-mono mb-1">
+                            <span className="font-bold text-[#18122B]">
+                              {formatINR(v.spent)} <span className="text-[#18122B]/50 font-normal">spent</span>
+                            </span>
+                            <span className="text-[#18122B]/60 font-semibold">
+                              of {formatINR(v.limit)} ({owlState.pct}%)
+                            </span>
+                          </div>
+                          <div className="h-2 w-full rounded-full bg-[#E5DAC4]/50 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${owlState.barColor} transition-all duration-500`}
+                              style={{ width: `${Math.max(progressPct > 0 ? 3 : 0, progressPct)}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Bottom Row: Remaining Metadata */}
+                        <div className="flex items-center justify-between pt-1 text-[10px] sm:text-[11px] font-medium text-[#18122B]/60">
+                          <span>
+                            {remaining < 0 ? (
+                              <span className="text-rose-600 font-bold">
+                                ⚠️ {formatINR(Math.abs(remaining))} over monthly ceiling
+                              </span>
+                            ) : (
+                              <span className="text-emerald-800 font-bold">
+                                ✓ {formatINR(remaining)} remaining this month
+                              </span>
+                            )}
+                          </span>
+
+                          <span className="font-mono text-[#18122B]/40 text-[10px]">
+                            {owlState.subtext}
+                          </span>
                         </div>
                       </div>
-                    </div>
 
-                    {/* Middle Progress Bar */}
-                    <div className="my-2">
-                      <div className="flex items-center justify-between text-[11px] font-mono mb-1">
-                        <span className="font-bold text-[#18122B]">
-                          {formatINR(v.spent)} <span className="text-[#18122B]/50 font-normal">spent</span>
-                        </span>
-                        <span className="text-[#18122B]/50">
-                          of {formatINR(v.limit)} limit ({status.pct}%)
-                        </span>
-                      </div>
-                      <div className="h-2 w-full rounded-full bg-[#E5DAC4]/50 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${status.barColor} transition-all duration-500`}
-                          style={{ width: `${Math.max(progressPct > 0 ? 3 : 0, progressPct)}%` }}
+                      {/* Right: Dynamic Owl Mascot Anchor */}
+                      <div
+                        className="relative w-16 sm:w-20 h-16 sm:h-20 shrink-0 flex items-center justify-center transition-all duration-300 transform-gpu group-hover:scale-105"
+                        title={`${owlState.label} (${owlState.pct}% spent)`}
+                      >
+                        <Image
+                          src={owlState.owlImage}
+                          alt={owlState.ariaLabel}
+                          width={110}
+                          height={110}
+                          className="w-auto h-full object-contain pointer-events-none drop-shadow-sm select-none"
                         />
                       </div>
-                    </div>
-
-                    {/* Bottom Row: Remaining Metadata */}
-                    <div className="flex items-center justify-between pt-1.5 text-[10px] sm:text-[11px] font-medium text-[#18122B]/60">
-                      <span>
-                        {remaining < 0 ? (
-                          <span className="text-rose-600 font-bold">
-                            ⚠️ {formatINR(Math.abs(remaining))} over monthly ceiling
-                          </span>
-                        ) : (
-                          <span className="text-emerald-800 font-bold">
-                            ✓ {formatINR(remaining)} remaining this month
-                          </span>
-                        )}
-                      </span>
-
-                      <span className="font-mono text-[#18122B]/40">
-                        {status.pct > 100 ? "100%+" : `${100 - status.pct}% headroom`}
-                      </span>
                     </div>
                   </div>
                 );
@@ -684,11 +780,11 @@ export function BudgetCard({ token }: { token: string }) {
               <div className="flex items-center gap-1.5">
                 <span className="text-amber-500 text-xs">💡</span>
                 <h3 className="font-serif text-xs sm:text-sm font-bold uppercase tracking-tight text-[#18122B]">
-                  SMART SUGGESTION
+                  COMPANION INSIGHT
                 </h3>
               </div>
               <span className="text-[10px] font-serif italic text-emerald-800 font-bold">
-                proactive AI ✦
+                live feedback ✦
               </span>
             </div>
 
@@ -696,20 +792,29 @@ export function BudgetCard({ token }: { token: string }) {
             {summaryMetrics.criticalCategory ? (
               <div className="p-2.5 rounded-xl bg-rose-50/70 border border-rose-200 text-xs space-y-1">
                 <p className="font-bold text-rose-800 flex items-center gap-1">
-                  <span>⚠️</span> {summaryMetrics.criticalCategory.category} is over budget
+                  <span>⚠️</span> {summaryMetrics.criticalCategory.category} is over budget!
                 </p>
                 <p className="text-[11px] text-[#18122B]/70 font-medium">
                   You have spent {formatINR(summaryMetrics.criticalCategory.spent)} of your{" "}
-                  {formatINR(summaryMetrics.criticalCategory.limit)} limit. Consider dialing back discretionary buys in this category.
+                  {formatINR(summaryMetrics.criticalCategory.limit)} limit. FinSage Owl has switched to alert mode.
+                </p>
+              </div>
+            ) : summaryMetrics.nearLimitCount > 0 ? (
+              <div className="p-2.5 rounded-xl bg-orange-50/70 border border-orange-200 text-xs space-y-1">
+                <p className="font-bold text-orange-900 flex items-center gap-1">
+                  <span>👀</span> {summaryMetrics.nearLimitCount} category budget approaching limit
+                </p>
+                <p className="text-[11px] text-[#18122B]/70 font-medium">
+                  You are between 70%–99% of your designated ceiling. Keep a watchful eye on weekend discretionary spends.
                 </p>
               </div>
             ) : summaryMetrics.healthyCategory ? (
               <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200 text-xs space-y-1">
                 <p className="font-bold text-emerald-900 flex items-center gap-1">
-                  <span>✨</span> {summaryMetrics.healthyCategory.category} is well under control
+                  <span>✨</span> {summaryMetrics.healthyCategory.category} is on track
                 </p>
                 <p className="text-[11px] text-[#18122B]/70 font-medium">
-                  You have used only {Math.round((summaryMetrics.healthyCategory.spent / summaryMetrics.healthyCategory.limit) * 100)}% of your limit, leaving {formatINR(summaryMetrics.healthyCategory.limit - summaryMetrics.healthyCategory.spent)} in safe savings headroom!
+                  You have used only {Math.round((summaryMetrics.healthyCategory.spent / summaryMetrics.healthyCategory.limit) * 100)}% of your limit, leaving {formatINR(summaryMetrics.healthyCategory.limit - summaryMetrics.healthyCategory.spent)} in safe headroom!
                 </p>
               </div>
             ) : (
@@ -718,7 +823,7 @@ export function BudgetCard({ token }: { token: string }) {
                   Give every rupee a designated ceiling
                 </p>
                 <p className="text-[11px] text-[#18122B]/70 font-medium">
-                  Setting specific category budgets prevents subconscious overspending and accelerates your savings journey.
+                  Setting specific category budgets prevents subconscious leaks and keeps your owl companion cheerful.
                 </p>
               </div>
             )}
@@ -791,7 +896,7 @@ export function BudgetCard({ token }: { token: string }) {
           {/* 3. Quick Action Banner */}
           <div className="rounded-2xl border border-[#E5DAC4] bg-[#FAF6ED] p-3.5 sm:p-4 text-center space-y-2">
             <h4 className="font-serif text-xs sm:text-sm font-bold text-[#18122B]">
-              Need to add or adjust a limit?
+              Need to adjust a monthly limit?
             </h4>
             <p className="text-[11px] text-[#18122B]/60 font-medium">
               Update monthly ceilings at any time as your spending patterns evolve.
