@@ -532,49 +532,49 @@ export function BudgetCard({ token }: { token: string }) {
       )}
 
       {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          1. HERO HEADER WITH NATURAL FLOATING MASCOT
+          1. HERO HEADER WITH NATURAL FLOATING MASCOT (COMPACT)
       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-      <div className="relative pt-2 sm:pt-4 pb-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="relative pt-1 sm:pt-2 pb-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Left Title Area */}
-          <div className="max-w-xl">
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-[#84cc16]/40 bg-[#ECFDF5] px-3 py-1 text-[11px] font-bold text-[#047857] mb-2 shadow-2xs">
+          <div>
+            <div className="inline-flex items-center gap-1 rounded-full border border-[#84cc16]/40 bg-[#ECFDF5] px-2.5 py-0.5 text-[10px] font-bold text-[#047857] mb-1 shadow-2xs">
               <span>🌿</span>
-              <span className="tracking-wide uppercase text-[10px]">BUDGET TRACKER</span>
+              <span className="tracking-wider uppercase text-[9px]">BUDGET TRACKER</span>
             </div>
-            <h1 className="font-serif text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-[#18122B]">
+            <h1 className="font-serif text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight text-[#18122B]">
               Budgets that behave. <span className="text-amber-500">✦</span>
             </h1>
-            <p className="text-xs sm:text-sm text-[#18122B]/60 font-medium mt-1">
+            <p className="text-xs text-[#18122B]/60 font-medium mt-0.5">
               Set limits, dodge the leaks, and keep your wallet smiling.
             </p>
           </div>
 
-          {/* Center/Right: Transparent Hero Owl with Speech Bubble & Action */}
-          <div className="flex items-center gap-4 sm:gap-6 self-start lg:self-center">
-            {/* Mascot Container - Pure floating illustration, NO box, NO card background */}
-            <div className="relative w-36 sm:w-44 h-24 sm:h-28 shrink-0 flex items-center justify-center">
+          {/* Center/Right: Compact Floating Mascot with Speech Bubble & Action */}
+          <div className="flex items-center gap-3 sm:gap-4 self-start sm:self-center">
+            {/* Mascot Container - Compact Floating Illustration */}
+            <div className="relative w-24 sm:w-28 h-16 sm:h-18 shrink-0 flex items-center justify-center">
               <Image
                 src="/finsage-owl.png"
                 alt="FinSage Companion Mascot"
-                width={200}
-                height={160}
+                width={140}
+                height={100}
                 priority
                 className="w-auto h-full object-contain pointer-events-none select-none drop-shadow-sm transition-transform duration-300 hover:scale-105"
               />
             </div>
 
             {/* Speech bubble & CTA */}
-            <div className="flex flex-col items-start gap-2">
-              <div className="relative rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] px-3.5 py-1.5 shadow-2xs text-[11px] font-serif font-bold text-[#18122B] flex items-center gap-1.5">
-                <span>You&apos;re on track! Keep it up!</span>
+            <div className="flex flex-col items-start gap-1.5">
+              <div className="relative rounded-xl border border-[#E5DAC4] bg-[#FFFDF8] px-2.5 py-1 shadow-2xs text-[10px] font-serif font-bold text-[#18122B] flex items-center gap-1">
+                <span>You&apos;re on track!</span>
                 <span className="text-emerald-600">💚</span>
               </div>
 
               <button
                 type="button"
                 onClick={() => handleOpenModal()}
-                className="inline-flex items-center gap-2 rounded-full bg-[#18122B] px-5 py-2.5 text-xs font-bold text-white shadow-md hover:bg-[#18122B]/90 hover:scale-[1.02] transition-all cursor-pointer active:scale-95"
+                className="inline-flex items-center gap-1.5 rounded-full bg-[#18122B] px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-[#18122B]/90 hover:scale-[1.02] transition-all cursor-pointer active:scale-95"
               >
                 <span>+ Add Budget</span>
                 <span>→</span>
@@ -587,7 +587,7 @@ export function BudgetCard({ token }: { token: string }) {
       {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
           2. LARGE COHESIVE BUDGET PULSE SUMMARY SECTION
       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-      <div className="rounded-3xl border border-[#E5DAC4] bg-[#FFFDF8] p-4 sm:p-6 shadow-xs my-3 sm:my-4">
+      <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-3.5 sm:p-4 shadow-xs my-2 sm:my-3">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           {/* Left: Donut Gauge + Pulse Headline */}
           <div className="flex items-center gap-4 sm:gap-6">
