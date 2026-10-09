@@ -60,6 +60,7 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
   const [progress, setProgress] = useState<UserProgress | null>(null);
   const [goals, setGoals] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactionsError, setTransactionsError] = useState<string | null>(null);
   const [showBalance, setShowBalance] = useState(true);
 
   // Salary Editing State
@@ -142,8 +143,17 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
         setGoals(goalsRes.value);
       }
 
-      if (txRes.status === "fulfilled" && Array.isArray(txRes.value)) {
-        setTransactions(txRes.value);
+      if (txRes.status === "fulfilled") {
+        const txList = Array.isArray(txRes.value)
+          ? txRes.value
+          : Array.isArray(txRes.value?.items)
+          ? txRes.value.items
+          : [];
+        setTransactions(txList);
+        setTransactionsError(null);
+      } else {
+        setTransactions([]);
+        setTransactionsError("Couldn't load transactions right now");
       }
     } catch (e) {
       console.error("[CompactDashboard] Error loading data:", e);
@@ -408,17 +418,12 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
     ];
   }, [insights]);
 
-  // Recent transactions
+  // Recent transactions (real authenticated user transactions only, up to 4)
   const displayTransactions = useMemo(() => {
-    if (transactions.length > 0) {
+    if (transactions && transactions.length > 0) {
       return transactions.slice(0, 4);
     }
-    return [
-      { id: "t1", category: "Entertainment", description: "Entertainment", amount: 1060, transactionDate: "2026-10-03" },
-      { id: "t2", category: "Food", description: "Zomato", amount: 0, transactionDate: "2026-09-28" },
-      { id: "t3", category: "Shopping", description: "Amazon", amount: 0, transactionDate: "2026-09-25" },
-      { id: "t4", category: "Transport", description: "Uber", amount: 0, transactionDate: "2026-09-20" },
-    ];
+    return [];
   }, [transactions]);
 
   // Display goals
@@ -1036,31 +1041,77 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
               </Link>
             </div>
 
-            <div className="mt-3.5 space-y-2.5">
-              {displayTransactions.map((tx, idx) => {
-                const meta = getCategoryMeta(tx.category || tx.description);
-                return (
-                  <div key={tx.id || idx} className="flex items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] ${meta.bg}`}>
-                        {meta.icon}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="font-bold text-[#18122B] text-[11px] truncate">
-                          {tx.description || tx.category}
-                        </p>
-                        <p className="text-[10px] text-[#18122B]/50 font-medium">
-                          1 tx • {tx.transactionDate ? new Date(tx.transactionDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Today"}
-                        </p>
+            {loading ? (
+              <div className="mt-3.5 space-y-2.5">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 animate-pulse">
+                    <div className="flex items-center gap-2">
+                      <div className="h-6 w-6 rounded-full bg-[#E5DAC4]/60" />
+                      <div className="space-y-1">
+                        <div className="h-3 w-24 rounded bg-[#E5DAC4]/60" />
+                        <div className="h-2 w-14 rounded bg-[#E5DAC4]/40" />
                       </div>
                     </div>
-                    <span className="font-mono text-[11px] font-bold text-[#c2410c] shrink-0">
-                      {formatINR(Number(tx.amount) || 0)}
-                    </span>
+                    <div className="h-3 w-12 rounded bg-[#E5DAC4]/60" />
                   </div>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+            ) : transactionsError ? (
+              <div className="mt-3.5 rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-center">
+                <p className="text-xs font-bold text-rose-800">
+                  {transactionsError}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => loadDashboardData()}
+                  className="mt-1.5 text-[11px] font-bold text-rose-700 underline hover:text-rose-900 transition cursor-pointer"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : displayTransactions.length === 0 ? (
+              <div className="mt-3 flex flex-col items-center justify-center rounded-xl border border-dashed border-[#E5DAC4] bg-[#FAF8F5] p-4 text-center">
+                <span className="text-xl mb-1">💳</span>
+                <p className="font-serif text-xs font-bold text-[#18122B]">
+                  No transactions yet
+                </p>
+                <p className="text-[10px] text-[#18122B]/60 mt-0.5 max-w-[200px]">
+                  Your money story starts with your first transaction.
+                </p>
+                <Link
+                  href="/transactions"
+                  className="mt-2.5 inline-flex items-center gap-1 rounded-full bg-teal-600 px-3 py-1 text-[10px] font-bold text-white shadow-3xs hover:bg-teal-700 transition"
+                >
+                  <span>+ Add transaction</span>
+                </Link>
+              </div>
+            ) : (
+              <div className="mt-3.5 space-y-2.5">
+                {displayTransactions.map((tx, idx) => {
+                  const meta = getCategoryMeta(tx.category || tx.description);
+                  return (
+                    <div key={tx.id || idx} className="flex items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] ${meta.bg}`}>
+                          {meta.icon}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="font-bold text-[#18122B] text-[11px] truncate">
+                            {tx.description || tx.category}
+                          </p>
+                          <p className="text-[10px] text-[#18122B]/50 font-medium">
+                            1 tx • {tx.transactionDate ? new Date(tx.transactionDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Today"}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="font-mono text-[11px] font-bold text-[#c2410c] shrink-0">
+                        {formatINR(Number(tx.amount) || 0)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 

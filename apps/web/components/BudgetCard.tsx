@@ -346,8 +346,13 @@ export function BudgetCard({ token }: { token: string }) {
         setInsights(insData.value);
       }
 
-      if (txData.status === "fulfilled" && Array.isArray(txData.value)) {
-        setTransactions(txData.value);
+      if (txData.status === "fulfilled") {
+        const txList = Array.isArray(txData.value)
+          ? txData.value
+          : Array.isArray(txData.value?.items)
+          ? txData.value.items
+          : [];
+        setTransactions(txList);
       }
     } catch (e) {
       console.error("[Budgets] Error loading data:", e);

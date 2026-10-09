@@ -104,8 +104,12 @@ export function FinancialGraph({ token }: FinancialGraphProps) {
 
       // 3. Process Transactions for Top Merchant per Category (Current Month Only)
       let allTransactions: TransactionItem[] = [];
-      if (transactionsRes.status === "fulfilled" && Array.isArray(transactionsRes.value)) {
-        allTransactions = transactionsRes.value;
+      if (transactionsRes.status === "fulfilled") {
+        allTransactions = Array.isArray(transactionsRes.value)
+          ? transactionsRes.value
+          : Array.isArray(transactionsRes.value?.items)
+          ? transactionsRes.value.items
+          : [];
       }
 
       // Filter transactions for current month only
