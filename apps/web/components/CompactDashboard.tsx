@@ -5,6 +5,7 @@ import Link from "next/link";
 import { formatINR } from "@/lib/formatCurrency";
 import {
   getMe,
+  updateMonthlySalary,
   getExpenseSummary,
   getSpendingTrend,
   getInsights,
@@ -49,7 +50,7 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
 
   // Core Data
   const [userName, setUserName] = useState<string>("Demo User");
-  const [salary, setSalary] = useState<number>(200000);
+  const [salary, setSalary] = useState<number | null>(null);
   const [spend, setSpend] = useState<number>(0);
   const [categories, setCategories] = useState<Array<{ category: string; total: number; count: number }>>([]);
   const [trend, setTrend] = useState<TrendItem[]>([]);
@@ -60,6 +61,13 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
   const [goals, setGoals] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [showBalance, setShowBalance] = useState(true);
+
+  // Salary Editing State
+  const [isEditingSalary, setIsEditingSalary] = useState<boolean>(false);
+  const [salaryInputValue, setSalaryInputValue] = useState<string>("");
+  const [savingSalary, setSavingSalary] = useState<boolean>(false);
+  const [salaryError, setSalaryError] = useState<string | null>(null);
+  const [salarySuccess, setSalarySuccess] = useState<boolean>(false);
 
   // What-If interactive slider states
   const [salaryChangePct, setSalaryChangePct] = useState<number>(10); // +10% default
@@ -102,7 +110,11 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
 
       if (meRes.status === "fulfilled" && meRes.value) {
         if (meRes.value.name) setUserName(meRes.value.name);
-        if (meRes.value.monthlySalary != null) setSalary(Number(meRes.value.monthlySalary));
+        if (meRes.value.monthlySalary != null) {
+          setSalary(Number(meRes.value.monthlySalary));
+        } else {
+          setSalary(null);
+        }
       }
 
       if (summaryRes.status === "fulfilled" && summaryRes.value) {
@@ -183,11 +195,65 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
     return "Good evening! ✦";
   }, []);
 
+  // Salary Edit Modal Handlers
+  const handleOpenSalaryModal = () => {
+    setSalaryInputValue(salary !== null && salary > 0 ? String(salary) : "");
+    setSalaryError(null);
+    setSalarySuccess(false);
+    setIsEditingSalary(true);
+  };
+
+  const handleCloseSalaryModal = () => {
+    if (savingSalary) return;
+    setIsEditingSalary(false);
+    setSalaryError(null);
+    setSalarySuccess(false);
+  };
+
+  const handleSaveSalary = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setSalaryError(null);
+    setSalarySuccess(false);
+
+    const cleanVal = salaryInputValue.replace(/,/g, "").trim();
+    const num = Number(cleanVal);
+
+    if (!cleanVal || isNaN(num) || !isFinite(num)) {
+      setSalaryError("Please enter a valid numeric salary amount.");
+      return;
+    }
+
+    if (num <= 0) {
+      setSalaryError("Monthly income must be greater than ₹0.");
+      return;
+    }
+
+    setSavingSalary(true);
+    try {
+      const res = await updateMonthlySalary(token, num);
+      if (res && res.monthlySalary != null) {
+        setSalary(Number(res.monthlySalary));
+      } else {
+        setSalary(num);
+      }
+      setSalarySuccess(true);
+      setTimeout(() => {
+        setIsEditingSalary(false);
+        setSalarySuccess(false);
+      }, 700);
+    } catch (err: any) {
+      setSalaryError(err.message || "Failed to save monthly income. Please try again.");
+    } finally {
+      setSavingSalary(false);
+    }
+  };
+
   // Financial calculations
-  const moneyIn = salary > 0 ? salary : 200000;
+  const hasSalary = salary !== null && !isNaN(salary) && salary > 0;
+  const moneyIn = hasSalary ? salary : 0;
   const moneyOut = spend;
-  const available = Math.max(0, moneyIn - moneyOut);
-  const savingsRate = moneyIn > 0 ? Math.round(((moneyIn - moneyOut) / moneyIn) * 100) : 0;
+  const available = hasSalary ? Math.max(0, moneyIn - moneyOut) : 0;
+  const savingsRate = hasSalary && moneyIn > 0 ? Math.round(((moneyIn - moneyOut) / moneyIn) * 100) : 0;
 
   // Month-over-Month calculation from trend
   const { momExpenseDiff, currentMonthName } = useMemo(() => {
@@ -470,24 +536,63 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
             <span className="text-xs font-black uppercase tracking-wider text-teal-700 flex items-center gap-1">
               <span>↗</span> Money In
             </span>
-            <span className="flex h-5 w-5 items-center justify-center rounded-md bg-teal-50 text-teal-700 text-xs">
-              📊
-            </span>
+            <button
+              type="button"
+              onClick={handleOpenSalaryModal}
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold transition cursor-pointer ${
+                hasSalary
+                  ? "bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 hover:border-teal-300"
+                  : "bg-teal-600 border border-teal-700 text-white hover:bg-teal-700 shadow-3xs"
+              }`}
+              title={hasSalary ? "Edit monthly income" : "Add monthly income"}
+            >
+              <span>{hasSalary ? "✏️ Edit" : "+ Add Income"}</span>
+            </button>
           </div>
 
           <div className="my-2">
-            <p className="font-serif text-3xl sm:text-[34px] font-black tracking-tight text-[#18122B] tabular-nums">
-              {formatINR(moneyIn)}
-            </p>
-            <p className="text-[11px] font-medium text-[#18122B]/60 mt-0.5">
-              Monthly Salary Flow
-            </p>
+            {hasSalary ? (
+              <>
+                <p className="font-serif text-3xl sm:text-[34px] font-black tracking-tight text-[#18122B] tabular-nums">
+                  {formatINR(salary!)}
+                </p>
+                <p className="text-[11px] font-medium text-[#18122B]/60 mt-0.5">
+                  Monthly Salary Flow
+                </p>
+              </>
+            ) : salary === 0 ? (
+              <>
+                <p className="font-serif text-3xl sm:text-[34px] font-black tracking-tight text-[#18122B] tabular-nums">
+                  ₹0
+                </p>
+                <p className="text-[11px] font-medium text-[#18122B]/60 mt-0.5">
+                  Monthly Salary Flow
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="font-serif text-2xl sm:text-[26px] font-bold tracking-tight text-[#18122B]/40 italic">
+                  Income not set yet
+                </p>
+                <p className="text-[11px] font-medium text-[#18122B]/60 mt-0.5">
+                  Add your monthly salary to track cash flow
+                </p>
+              </>
+            )}
           </div>
 
           <div className="flex items-center justify-between pt-1">
-            <span className="text-[10px] text-[#18122B]/50 font-medium">vs last month</span>
-            <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-              +12%
+            <span className="text-[10px] text-[#18122B]/50 font-medium">
+              {hasSalary ? "Verified Baseline" : "Profile Status"}
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold border ${
+                hasSalary
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                  : "bg-amber-50 border-amber-200 text-amber-700"
+              }`}
+            >
+              {hasSalary ? "Active Flow" : "Not Configured"}
             </span>
           </div>
         </div>
@@ -736,7 +841,7 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
                   INCOME
                 </span>
                 <span className="font-serif text-xs font-bold tabular-nums">
-                  {formatINR(moneyIn)}
+                  {hasSalary ? formatINR(moneyIn) : "Not set"}
                 </span>
               </div>
 
@@ -1120,6 +1225,149 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
           </div>
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* 6. EDIT / ADD MONTHLY INCOME MODAL                                         */}
+      {/* ========================================================================= */}
+      {isEditingSalary && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#18122B]/50 backdrop-blur-xs animate-in fade-in duration-200"
+          onClick={handleCloseSalaryModal}
+        >
+          <div
+            className="relative w-full max-w-md rounded-2xl border-2 border-[#E5DAC4] bg-[#FFFDF8] p-5 sm:p-6 shadow-2xl transition-all"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-3 border-b border-[#E5DAC4]/60">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-teal-100 text-teal-800 text-base shadow-3xs">
+                  💰
+                </div>
+                <div>
+                  <h3 className="font-serif text-lg font-bold text-[#18122B] leading-tight">
+                    {hasSalary ? "Update Monthly Income" : "Set Monthly Income"}
+                  </h3>
+                  <p className="text-[11px] font-medium text-[#18122B]/60 mt-0.5">
+                    Net monthly take-home salary in INR (₹)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseSalaryModal}
+                disabled={savingSalary}
+                className="text-[#18122B]/40 hover:text-[#18122B] text-lg font-bold p-1 rounded-lg transition"
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleSaveSalary} className="mt-4 space-y-4">
+              {/* Amount Input */}
+              <div>
+                <label
+                  htmlFor="monthly-salary-input"
+                  className="block text-[11px] font-bold uppercase tracking-wider text-[#18122B]/70 mb-1.5"
+                >
+                  Monthly Income (₹)
+                </label>
+                <div className="relative">
+                  <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 font-serif text-base font-bold text-[#18122B]/50">
+                    ₹
+                  </span>
+                  <input
+                    id="monthly-salary-input"
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="e.g. 150000"
+                    value={salaryInputValue}
+                    onChange={(e) => {
+                      setSalaryInputValue(e.target.value);
+                      if (salaryError) setSalaryError(null);
+                    }}
+                    autoFocus
+                    disabled={savingSalary}
+                    className="w-full rounded-xl border-2 border-[#E5DAC4] bg-white py-2.5 pl-8 pr-3 font-mono text-base font-bold text-[#18122B] placeholder:text-[#18122B]/30 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20 transition"
+                  />
+                </div>
+                {/* Live Indian Currency Preview */}
+                {salaryInputValue && !isNaN(Number(salaryInputValue)) && Number(salaryInputValue) > 0 && (
+                  <p className="text-[11px] text-teal-800 font-semibold mt-1.5 flex items-center gap-1">
+                    <span>Preview:</span>
+                    <span className="font-bold">{formatINR(Number(salaryInputValue))}</span>
+                    <span className="text-[#18122B]/50 font-normal">per month</span>
+                  </p>
+                )}
+              </div>
+
+              {/* Quick presets */}
+              <div>
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-[#18122B]/50 mb-1.5">
+                  Quick Select
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[50000, 100000, 150000, 200000, 300000].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setSalaryInputValue(String(preset))}
+                      disabled={savingSalary}
+                      className="rounded-lg border border-[#E5DAC4] bg-[#FAF8F5] px-2.5 py-1 text-[11px] font-semibold text-[#18122B]/80 hover:border-teal-400 hover:bg-teal-50 hover:text-teal-800 transition cursor-pointer"
+                    >
+                      {formatINR(preset)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Feedback Alerts */}
+              {salaryError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-2.5 text-xs font-semibold text-rose-800 flex items-center gap-2">
+                  <span>⚠️</span>
+                  <span>{salaryError}</span>
+                </div>
+              )}
+
+              {salarySuccess && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-2.5 text-xs font-semibold text-emerald-800 flex items-center gap-2">
+                  <span>✓</span>
+                  <span>Income updated successfully!</span>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E5DAC4]/60">
+                <button
+                  type="button"
+                  onClick={handleCloseSalaryModal}
+                  disabled={savingSalary}
+                  className="rounded-xl border border-[#DDD9CF] bg-white px-4 py-2 text-xs font-bold text-[#18122B]/70 hover:bg-[#FAF8F5] hover:text-[#18122B] transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingSalary || !salaryInputValue || Number(salaryInputValue) <= 0}
+                  className="rounded-xl bg-teal-600 px-5 py-2 text-xs font-bold text-white shadow-sm hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  {savingSalary ? (
+                    <>
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      <span>Saving…</span>
+                    </>
+                  ) : (
+                    <span>Save Income</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
