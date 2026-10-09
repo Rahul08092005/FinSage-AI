@@ -60,6 +60,7 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
   const [missionsError, setMissionsError] = useState<string | null>(null);
   const [progress, setProgress] = useState<UserProgress | null>(null);
   const [goals, setGoals] = useState<any[]>([]);
+  const [goalsError, setGoalsError] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [transactionsError, setTransactionsError] = useState<string | null>(null);
   const [showBalance, setShowBalance] = useState(true);
@@ -146,6 +147,10 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
 
       if (goalsRes.status === "fulfilled" && Array.isArray(goalsRes.value)) {
         setGoals(goalsRes.value);
+        setGoalsError(null);
+      } else if (goalsRes.status === "rejected") {
+        setGoals([]);
+        setGoalsError("Couldn't load your goals right now.");
       }
 
       if (txRes.status === "fulfilled") {
@@ -427,47 +432,62 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
     return [];
   }, [transactions]);
 
-  // Display goals
+  // Display goals (real authenticated user goals only)
   const displayGoals = useMemo(() => {
-    if (goals.length > 0) {
+    if (Array.isArray(goals) && goals.length > 0) {
+      const now = Date.now();
       return goals.slice(0, 2).map((g) => {
-        const target = Number(g.targetAmount) || 100000;
-        const current = Number(g.currentAmount ?? (target * 0.5));
-        const pct = Math.min(100, Math.round((current / target) * 100));
+        const target = Number(g.targetAmount) || 0;
+        let current = 0;
+        if (typeof window !== "undefined") {
+          try {
+            const raw = localStorage.getItem(`finsage_goal_savings_${g.id}`);
+            if (raw) current = parseFloat(raw) || 0;
+          } catch {}
+        }
+        if (g.currentAmount !== undefined && g.currentAmount !== null) {
+          current = Number(g.currentAmount) || current;
+        }
+        const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
+
+        const endMs = g.endDate ? new Date(g.endDate).getTime() : 0;
+        const diffDays = endMs > 0 ? Math.max(0, Math.ceil((endMs - now) / (1000 * 60 * 60 * 24))) : 0;
+        const monthsLeft = Math.max(1, Math.ceil(diffDays / 30));
+
+        const lower = (g.title || "").toLowerCase();
+        const isTravel = lower.includes("trip") || lower.includes("travel") || lower.includes("flight") || lower.includes("vacation");
+        const isHome = lower.includes("home") || lower.includes("house") || lower.includes("rent") || lower.includes("flat");
+        const isTech = lower.includes("laptop") || lower.includes("phone") || lower.includes("tech") || lower.includes("mac");
+
+        let icon = "🎯";
+        let iconBg = "bg-amber-100 text-amber-800";
+        if (isTravel) {
+          icon = "✈️";
+          iconBg = "bg-sky-100 text-sky-700";
+        } else if (isHome) {
+          icon = "🏠";
+          iconBg = "bg-rose-100 text-rose-700";
+        } else if (isTech) {
+          icon = "💻";
+          iconBg = "bg-violet-100 text-violet-700";
+        } else if (lower.includes("emergency") || lower.includes("shield") || lower.includes("fund")) {
+          icon = "💰";
+          iconBg = "bg-amber-100 text-amber-800";
+        }
+
         return {
           id: g.id,
           title: g.title || "Goal",
           target,
           current,
           pct,
-          icon: g.title?.toLowerCase().includes("trip") || g.title?.toLowerCase().includes("travel") ? "✈️" : "💰",
-          iconBg: g.title?.toLowerCase().includes("trip") ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-800",
-          monthsLeft: g.monthsLeft ?? 12,
+          icon,
+          iconBg,
+          monthsLeft,
         };
       });
     }
-    return [
-      {
-        id: "g1",
-        title: "Emergency Fund",
-        target: 100000,
-        current: 50000,
-        pct: 50,
-        icon: "💰",
-        iconBg: "bg-amber-100 text-amber-800",
-        monthsLeft: 12,
-      },
-      {
-        id: "g2",
-        title: "Europe Trip",
-        target: 200000,
-        current: 120000,
-        pct: 60,
-        icon: "✈️",
-        iconBg: "bg-sky-100 text-sky-700",
-        monthsLeft: 18,
-      },
-    ];
+    return [];
   }, [goals]);
 
   return (
@@ -1287,35 +1307,84 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
               </Link>
             </div>
 
-            <div className="mt-3.5 space-y-3">
-              {displayGoals.map((g) => (
-                <div key={g.id} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs ${g.iconBg}`}>
-                        {g.icon}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="font-bold text-[#18122B] text-[11px] truncate">{g.title}</p>
-                        <p className="font-mono text-[10px] text-[#18122B]/60">
-                          {formatINR(g.current)} / {formatINR(g.target)}
-                        </p>
+            {loading ? (
+              <div className="mt-3.5 space-y-3">
+                {[1, 2].map((i) => (
+                  <div key={i} className="space-y-1.5 animate-pulse">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="h-6 w-6 rounded-full bg-[#E5DAC4]/60" />
+                        <div className="space-y-1">
+                          <div className="h-3 w-28 rounded bg-[#E5DAC4]/60" />
+                          <div className="h-2 w-16 rounded bg-[#E5DAC4]/40" />
+                        </div>
                       </div>
+                      <div className="h-3 w-8 rounded bg-[#E5DAC4]/60" />
                     </div>
-                    <span className="font-mono text-[10px] font-bold text-[#18122B]">{g.pct}%</span>
+                    <div className="h-1.5 w-full rounded-full bg-[#E5DAC4]/40 ml-8" />
                   </div>
-                  <div className="flex items-center justify-between text-[9px] text-[#18122B]/50 font-medium pl-8">
-                    <span>{g.monthsLeft} months left</span>
+                ))}
+              </div>
+            ) : goalsError ? (
+              <div className="mt-3.5 rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-center">
+                <p className="text-xs font-bold text-rose-800">
+                  {goalsError}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => loadDashboardData()}
+                  className="mt-1.5 text-[11px] font-bold text-rose-700 underline hover:text-rose-900 transition cursor-pointer"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : displayGoals.length === 0 ? (
+              <div className="mt-3.5 flex flex-col items-center justify-center rounded-xl border border-dashed border-[#E5DAC4] bg-[#FAF8F5] p-4 text-center">
+                <span className="text-xl mb-1">🎯</span>
+                <p className="font-serif text-xs font-bold text-[#18122B]">
+                  No goals set yet ✦
+                </p>
+                <p className="text-[10px] text-[#18122B]/60 mt-0.5 max-w-[240px]">
+                  Every big money win starts somewhere. Create your first goal to start tracking your progress.
+                </p>
+                <Link
+                  href="/goals"
+                  className="mt-2.5 inline-flex items-center gap-1 rounded-full bg-[#18122B] px-3 py-1 text-[10px] font-bold text-white shadow-3xs hover:bg-stone-800 transition"
+                >
+                  <span>+ Create your first goal</span>
+                </Link>
+              </div>
+            ) : (
+              <div className="mt-3.5 space-y-3">
+                {displayGoals.map((g) => (
+                  <div key={g.id} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs ${g.iconBg}`}>
+                          {g.icon}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="font-bold text-[#18122B] text-[11px] truncate">{g.title}</p>
+                          <p className="font-mono text-[10px] text-[#18122B]/60">
+                            {formatINR(g.current)} / {formatINR(g.target)}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="font-mono text-[10px] font-bold text-[#18122B]">{g.pct}%</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[9px] text-[#18122B]/50 font-medium pl-8">
+                      <span>{g.monthsLeft} {g.monthsLeft === 1 ? "month" : "months"} left</span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-[#E5DAC4]/60 overflow-hidden ml-8">
+                      <div
+                        className="h-full bg-[#84cc16] rounded-full transition-all duration-300"
+                        style={{ width: `${g.pct}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="h-1.5 w-full rounded-full bg-[#E5DAC4]/60 overflow-hidden ml-8">
-                    <div
-                      className="h-full bg-[#84cc16] rounded-full transition-all duration-300"
-                      style={{ width: `${g.pct}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Yellow Post-it Sticker */}
