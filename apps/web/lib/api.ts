@@ -1014,7 +1014,7 @@ export async function concludeExperiment(
     console.warn("[concludeExperiment] Primary backend fetch error, using evaluation fallback:", err);
   }
 
-  // Local evaluation calculation fallback based on actual transaction patterns or mathematical evaluation
+  // Local evaluation calculation based strictly on user's real transactions
   const list = getLocalExperiments();
   const index = list.findIndex((e) => e.id === id);
   if (index === -1) {
@@ -1022,32 +1022,66 @@ export async function concludeExperiment(
   }
 
   const exp = list[index];
-  
-  let baselineDailyAvg = 450;
-  let interventionDailyAvg = 320;
-  
+  const now = new Date();
+  const startDate = exp.startDate ? new Date(exp.startDate) : exp.createdAt ? new Date(exp.createdAt) : now;
+  const baselineDays = Math.max(1, Number(exp.baselineDays) || 30);
+  const baselineStart = new Date(startDate.getTime() - baselineDays * 24 * 60 * 60 * 1000);
+  const interventionDays = Math.max(1, Math.round((now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
+
+  let baselineTotal = 0;
+  let interventionTotal = 0;
+
   try {
-    const txsRes = await fetch(`${BFF_URL}/api/v1/transactions?limit=100`, {
+    const txsRes = await fetch(`${BFF_URL}/api/v1/transactions?limit=200`, {
       headers: authHeaders(token),
       cache: "no-store",
     });
     if (txsRes.ok) {
       const txs = await txsRes.json();
       if (Array.isArray(txs)) {
-        const catTxs = txs.filter((t: any) => t.category?.toLowerCase() === exp.category.toLowerCase());
-        const total = catTxs.reduce((sum: number, t: any) => sum + (Number(t.amount) || 0), 0);
-        if (total > 0) {
-          baselineDailyAvg = Math.round(total / (exp.baselineDays || 30));
-          interventionDailyAvg = Math.round(baselineDailyAvg * 0.78);
+        const catTxs = txs.filter(
+          (t: any) =>
+            t.category &&
+            exp.category &&
+            t.category.trim().toLowerCase() === exp.category.trim().toLowerCase()
+        );
+
+        for (const t of catTxs) {
+          const tDate = t.transactionDate ? new Date(t.transactionDate) : null;
+          const amt = Math.abs(Number(t.amount) || 0);
+          if (tDate) {
+            if (tDate >= baselineStart && tDate < startDate) {
+              baselineTotal += amt;
+            } else if (tDate >= startDate && tDate <= now) {
+              interventionTotal += amt;
+            }
+          }
         }
       }
     }
-  } catch {}
+  } catch (e) {
+    console.warn("[concludeExperiment] Failed to fetch live transactions for evaluation:", e);
+  }
 
-  const diff = interventionDailyAvg - baselineDailyAvg;
-  const pctDiff = baselineDailyAvg > 0 ? Math.round(((diff) / baselineDailyAvg) * 100) : 0;
-  const absDiff = Math.abs(pctDiff);
-  const confidence = absDiff >= 20 ? "high" : absDiff >= 10 ? "medium" : "low";
+  const baselineDailyAvg = Math.round((baselineTotal / baselineDays) * 100) / 100;
+  const interventionDailyAvg = Math.round((interventionTotal / interventionDays) * 100) / 100;
+  const diff = Math.round((interventionDailyAvg - baselineDailyAvg) * 100) / 100;
+
+  let pctDiff = 0;
+  if (baselineDailyAvg > 0) {
+    pctDiff = Math.round(((interventionDailyAvg - baselineDailyAvg) / baselineDailyAvg) * 100);
+  } else if (interventionDailyAvg > 0) {
+    pctDiff = 100;
+  }
+
+  const diffPct = Math.abs(pctDiff);
+  let confidence: "high" | "medium" | "low" = "medium";
+  if (interventionDays < 7 || diffPct < 10) {
+    confidence = "low";
+  } else if (interventionDays >= 14 && diffPct >= 20) {
+    confidence = "high";
+  }
+
   const annualImpact = Math.round(diff * 365);
 
   const result: ExperimentResult = {
@@ -1068,7 +1102,7 @@ export async function concludeExperiment(
   const updatedExp: FinancialExperiment = {
     ...exp,
     status: "completed",
-    concludedAt: new Date().toISOString(),
+    concludedAt: now.toISOString(),
     result,
   };
 
