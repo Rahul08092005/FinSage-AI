@@ -972,7 +972,7 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
                 </h2>
               </div>
               <Link
-                href="/what-if"
+                href="/experiments"
                 className="rounded-full border border-[#DDD9CF] bg-white px-2 py-0.5 text-[10px] font-bold text-[#18122B] hover:border-[#18122B] transition"
               >
                 Try it &rarr;
@@ -1044,7 +1044,7 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
 
           <div className="pt-2">
             <Link
-              href="/what-if"
+              href="/experiments"
               className="text-[10px] font-bold text-[#18122B]/70 hover:text-[#18122B] flex items-center gap-1 transition"
             >
               <span>See new savings & goal timelines instantly</span>

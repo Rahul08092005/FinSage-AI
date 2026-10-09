@@ -44,7 +44,6 @@ export function Navbar() {
     { href: "/transactions", label: "Transactions" },
     { href: "/budgets", label: "Budgets" },
     { href: "/goals", label: "Goals" },
-    { href: "/what-if", label: "What-If" },
     { href: "/experiments", label: "Experiments" },
     { href: "/household", label: "Household" },
     { href: "/advisor", label: "AI Advisor", isAi: true },
