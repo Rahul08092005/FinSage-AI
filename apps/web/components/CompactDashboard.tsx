@@ -57,6 +57,7 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
   const [insights, setInsights] = useState<InsightItem[]>([]);
   const [refreshingInsights, setRefreshingInsights] = useState(false);
   const [missions, setMissions] = useState<Mission[]>([]);
+  const [missionsError, setMissionsError] = useState<string | null>(null);
   const [progress, setProgress] = useState<UserProgress | null>(null);
   const [goals, setGoals] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -133,6 +134,10 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
 
       if (missionsRes.status === "fulfilled" && Array.isArray(missionsRes.value)) {
         setMissions(missionsRes.value);
+        setMissionsError(null);
+      } else if (missionsRes.status === "rejected") {
+        setMissions([]);
+        setMissionsError("Couldn't load your money missions right now.");
       }
 
       if (progressRes.status === "fulfilled" && progressRes.value) {
@@ -383,16 +388,12 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
     };
   }, [trend]);
 
-  // Active missions
+  // Active missions (real authenticated user missions only)
   const activeMissions = useMemo(() => {
-    if (missions.length > 0) {
+    if (Array.isArray(missions) && missions.length > 0) {
       return missions.filter((m) => m.status === "active").slice(0, 2);
     }
-    // Default fallback missions
-    return [
-      { id: "m1", title: "Track food spending pace", progress: 7, target: 10, xpReward: 50, status: "active" as const },
-      { id: "m2", title: "Stay within shopping allocation", progress: 3, target: 5, xpReward: 75, status: "active" as const },
-    ];
+    return [];
   }, [missions]);
 
   // Active insights
@@ -923,43 +924,100 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
               Tiny wins. Keep the streak.
             </p>
 
-            <div className="mt-3.5 space-y-2.5">
-              {activeMissions.map((mission, idx) => {
-                const pct = Math.min(100, Math.round((mission.progress / (mission.target || 1)) * 100));
-                return (
+            {loading ? (
+              <div className="mt-3.5 space-y-2.5">
+                {[1, 2].map((i) => (
                   <div
-                    key={mission.id || idx}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-[#E5DAC4]/60 bg-[#FAF8F5] p-2.5 shadow-3xs hover:border-[#84cc16]/60 transition"
+                    key={i}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-[#E5DAC4]/60 bg-[#FAF8F5] p-2.5 animate-pulse"
                   >
-                    <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#84cc16]/20 text-[#3f6212] text-xs">
-                        🌱
-                      </span>
-                      <div className="flex-1 min-w-0 space-y-1">
-                        <p className="text-[11px] font-bold text-[#18122B] truncate">
-                          {mission.title}
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 flex-1 max-w-[110px] rounded-full bg-[#E5DAC4]/60 overflow-hidden">
-                            <div
-                              className="h-full bg-[#84cc16] rounded-full"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                          <span className="font-mono text-[10px] text-[#18122B]/60 font-semibold">
-                            {mission.progress} / {mission.target}
-                          </span>
-                        </div>
+                    <div className="flex items-center gap-2.5 flex-1">
+                      <div className="h-6 w-6 rounded-full bg-[#E5DAC4]/60" />
+                      <div className="flex-1 space-y-1">
+                        <div className="h-3 w-32 rounded bg-[#E5DAC4]/60" />
+                        <div className="h-2 w-20 rounded bg-[#E5DAC4]/40" />
                       </div>
                     </div>
-
-                    <span className="rounded-full border border-[#84cc16]/50 bg-[#84cc16]/20 px-2 py-0.5 font-mono text-[10px] font-bold text-[#3f6212] shrink-0">
-                      +{mission.xpReward || 50} XP
-                    </span>
+                    <div className="h-4 w-12 rounded-full bg-[#E5DAC4]/60" />
                   </div>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+            ) : missionsError ? (
+              <div className="mt-3.5 rounded-xl border border-rose-200 bg-rose-50/70 p-3 text-center">
+                <p className="text-xs font-bold text-rose-800">
+                  {missionsError}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => loadDashboardData()}
+                  className="mt-1.5 text-[11px] font-bold text-rose-700 underline hover:text-rose-900 transition cursor-pointer"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : activeMissions.length === 0 ? (
+              <div className="mt-3.5 flex flex-col items-center justify-center rounded-xl border border-dashed border-[#E5DAC4] bg-[#FAF8F5] p-4 text-center">
+                <span className="text-xl mb-1">🎯</span>
+                <p className="font-serif text-xs font-bold text-[#18122B]">
+                  No money missions yet ✦
+                </p>
+                <p className="text-[10px] text-[#18122B]/60 mt-0.5 max-w-[260px]">
+                  Your next money win starts with real activity. Add a transaction or set a budget to unlock relevant missions.
+                </p>
+                <div className="mt-2.5 flex items-center gap-2">
+                  <Link
+                    href="/transactions"
+                    className="inline-flex items-center gap-1 rounded-full bg-[#18122B] px-2.5 py-1 text-[10px] font-bold text-white hover:bg-stone-800 transition"
+                  >
+                    + Transaction
+                  </Link>
+                  <Link
+                    href="/budgets"
+                    className="inline-flex items-center gap-1 rounded-full border border-[#DDD9CF] bg-white px-2.5 py-1 text-[10px] font-bold text-[#18122B] hover:bg-[#FAF8F5] transition"
+                  >
+                    Set Budget
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3.5 space-y-2.5">
+                {activeMissions.map((mission, idx) => {
+                  const pct = Math.min(100, Math.round((mission.progress / (mission.target || 1)) * 100));
+                  return (
+                    <div
+                      key={mission.id || idx}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-[#E5DAC4]/60 bg-[#FAF8F5] p-2.5 shadow-3xs hover:border-[#84cc16]/60 transition"
+                    >
+                      <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#84cc16]/20 text-[#3f6212] text-xs">
+                          🌱
+                        </span>
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <p className="text-[11px] font-bold text-[#18122B] truncate">
+                            {mission.title}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 flex-1 max-w-[110px] rounded-full bg-[#E5DAC4]/60 overflow-hidden">
+                              <div
+                                className="h-full bg-[#84cc16] rounded-full"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            <span className="font-mono text-[10px] text-[#18122B]/60 font-semibold">
+                              {mission.progress} / {mission.target}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <span className="rounded-full border border-[#84cc16]/50 bg-[#84cc16]/20 px-2 py-0.5 font-mono text-[10px] font-bold text-[#3f6212] shrink-0">
+                        +{mission.xpReward || 50} XP
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 

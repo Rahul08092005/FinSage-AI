@@ -1218,47 +1218,13 @@ export async function getProgress(token: string): Promise<UserProgress> {
   return baseline;
 }
 
-const DEFAULT_MISSIONS: Mission[] = [
-  {
-    id: "m_food_track",
-    title: "Track food spending pace",
-    description: "Record and review meal and grocery expenses this week",
-    category: "Food",
-    progress: 7,
-    target: 10,
-    xpReward: 50,
-    status: "active",
-  },
-  {
-    id: "m_budget_check",
-    title: "Stay within shopping allocation",
-    description: "Keep discretionary shopping under planned monthly cap",
-    category: "Shopping",
-    progress: 3,
-    target: 5,
-    xpReward: 75,
-    status: "active",
-  },
-  {
-    id: "m_emergency_save",
-    title: "Shield fund contribution",
-    description: "Allocate monthly savings to your emergency safety buffer",
-    category: "Savings",
-    progress: 1,
-    target: 1,
-    xpReward: 100,
-    status: "completed",
-    completedAt: new Date().toISOString(),
-  },
-];
-
 function getStoredMissions(): Mission[] {
-  if (typeof window === "undefined") return DEFAULT_MISSIONS;
+  if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(MISSIONS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : DEFAULT_MISSIONS;
+    return raw ? JSON.parse(raw) : [];
   } catch {
-    return DEFAULT_MISSIONS;
+    return [];
   }
 }
 
