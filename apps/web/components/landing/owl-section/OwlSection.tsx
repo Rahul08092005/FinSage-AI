@@ -11,26 +11,32 @@ export function OwlSection() {
   return (
     <section
       id="problem"
-      className="relative w-full border-t border-[#E5DAC4] bg-[#FAF8F5] py-8 sm:py-12 lg:py-16 overflow-hidden"
+      className="relative w-full border-t border-[#E5DAC4] bg-[#FAF8F3] py-8 sm:py-12 lg:py-14 overflow-hidden"
     >
-      <div className="mx-auto w-full max-w-[1672px] px-4 sm:px-6 lg:px-8">
+      {/* Background Faint Radial Warm Ambient Glow behind the entire center section */}
+      <div
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_50%,rgba(255,255,255,0.9)_0%,rgba(250,248,243,0)_75%)] select-none"
+        aria-hidden="true"
+      />
+
+      <div className="relative mx-auto w-full max-w-[1672px] px-4 sm:px-6 lg:px-8">
         
         {/* ========================================================================= */}
-        {/* DESKTOP LAYOUT (lg: >= 1024px) — Exact 1672 / 941 Stage Coordinate System */}
+        {/* DESKTOP LAYOUT (lg: >= 1024px) — Container Query Inline-Size Stage        */}
         {/* ========================================================================= */}
-        <div className="hidden lg:block relative w-full aspect-[1672/941] max-w-[1672px] mx-auto overflow-visible select-none">
-          
+        <div
+          className="hidden lg:block relative w-full aspect-[1672/941] max-w-[1672px] mx-auto overflow-visible select-none [container-type:inline-size]"
+        >
           {/* 1. SVG Connectors Loop */}
           <ConnectorLines />
 
           {/* 2. Central 3D Podium & Owl Character Stage */}
           <OwlStage />
 
-          {/* 3. 7 Feature Cards Positioned at Strict Coordinates */}
+          {/* 3. 7 Feature Cards Positioned at Strict Coordinates with Tints */}
           {OWL_FEATURE_CARDS.map((card) => (
             <FeatureCard key={card.id} card={card} isAbsolute={true} />
           ))}
-
         </div>
 
         {/* ========================================================================= */}
@@ -39,7 +45,7 @@ export function OwlSection() {
         <div className="lg:hidden flex flex-col gap-6 items-center w-full">
           
           {/* Centered Owl Showcase Card */}
-          <div className="relative w-full max-w-sm rounded-3xl border border-[#18122B]/15 bg-[#F2E5CB] p-6 shadow-sm flex flex-col items-center text-center overflow-hidden">
+          <div className="relative w-full max-w-sm rounded-[28px] border border-[#18122B]/15 bg-gradient-to-b from-[#FFFDF9] to-[#F5ECE0] p-6 shadow-sm flex flex-col items-center text-center overflow-hidden">
             <div className="relative w-44 h-44 mb-2 flex items-center justify-center">
               <Image
                 src={OWL_ASSETS.owl.original}
