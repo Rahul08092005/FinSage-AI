@@ -6,9 +6,22 @@ import {
   createHousehold,
   inviteToHousehold,
   getHouseholdSummary,
+  addHouseholdExpense,
+  deleteHouseholdExpense,
   HouseholdSummary,
+  HouseholdExpenseItem,
 } from "@/lib/api";
 import { formatINR } from "@/lib/formatCurrency";
+
+const EXPENSE_CATEGORIES = [
+  "Rent",
+  "Utilities & Bills",
+  "Groceries & Food",
+  "Internet & WiFi",
+  "Household Maintenance",
+  "Supplies",
+  "Other",
+];
 
 function HouseholdContent({ token }: { token: string }) {
   const [summary, setSummary] = useState<HouseholdSummary | null>(null);
@@ -22,9 +35,26 @@ function HouseholdContent({ token }: { token: string }) {
 
   // Invite form state
   const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteName, setInviteName] = useState("");
   const [inviting, setInviting] = useState(false);
   const [inviteMessage, setInviteMessage] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
+
+  // Add Shared Expense Form state
+  const [isAddingExpense, setIsAddingExpense] = useState(false);
+  const [expDescription, setExpDescription] = useState("");
+  const [expAmount, setExpAmount] = useState("");
+  const [expCategory, setExpCategory] = useState("Rent");
+  const [expDate, setExpDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [payerMemberId, setPayerMemberId] = useState("");
+  const [splitMethod, setSplitMethod] = useState<"EQUAL" | "CUSTOM">("EQUAL");
+  const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
+  const [customSplits, setCustomSplits] = useState<Record<string, string>>({});
+  const [savingExpense, setSavingExpense] = useState(false);
+  const [expenseError, setExpenseError] = useState<string | null>(null);
+
+  // Deleting state
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadHousehold = useCallback(async () => {
     setLoading(true);
@@ -32,9 +62,14 @@ function HouseholdContent({ token }: { token: string }) {
     try {
       const data = await getHouseholdSummary(token);
       setSummary(data);
+      if (data && data.memberBreakdown.length > 0) {
+        // Default payer to first member if unset
+        setPayerMemberId((prev) => prev || data.memberBreakdown[0].id);
+        setSelectedParticipants(data.memberBreakdown.map((m) => m.id));
+      }
     } catch (err: any) {
       console.error("[HouseholdPage] Load error:", err);
-      setError("Failed to load household summary.");
+      setError("Failed to load household records.");
     } finally {
       setLoading(false);
     }
@@ -67,17 +102,126 @@ function HouseholdContent({ token }: { token: string }) {
     setInviteError(null);
     setInviteMessage(null);
     try {
-      await inviteToHousehold(token, summary.householdId, inviteEmail.trim());
+      await inviteToHousehold(token, summary.householdId, inviteEmail.trim(), inviteName.trim() || undefined);
       setInviteMessage(`Invitation sent to ${inviteEmail.trim()} ✨`);
       setInviteEmail("");
+      setInviteName("");
       await loadHousehold();
-      setTimeout(() => setInviteMessage(null), 3500);
+      setTimeout(() => setInviteMessage(null), 4000);
     } catch (err: any) {
       setInviteError(err?.message || "Failed to send invitation.");
     } finally {
       setInviting(false);
     }
   }
+
+  function handleOpenExpenseModal() {
+    setExpenseError(null);
+    setExpDescription("");
+    setExpAmount("");
+    setExpCategory("Rent");
+    setExpDate(new Date().toISOString().split("T")[0]);
+    if (summary && summary.memberBreakdown.length > 0) {
+      setPayerMemberId(summary.memberBreakdown[0].id);
+      setSelectedParticipants(summary.memberBreakdown.map((m) => m.id));
+      const initialCustom: Record<string, string> = {};
+      summary.memberBreakdown.forEach((m) => {
+        initialCustom[m.id] = "";
+      });
+      setCustomSplits(initialCustom);
+    }
+    setSplitMethod("EQUAL");
+    setIsAddingExpense(true);
+  }
+
+  async function handleSaveExpense(e: React.FormEvent) {
+    e.preventDefault();
+    if (!summary?.householdId) return;
+    setExpenseError(null);
+
+    const cleanAmount = Number(expAmount.replace(/,/g, "").trim());
+    if (!cleanAmount || cleanAmount <= 0 || isNaN(cleanAmount)) {
+      setExpenseError("Please enter a valid positive expense amount.");
+      return;
+    }
+
+    if (!expDescription.trim()) {
+      setExpenseError("Please provide an expense description.");
+      return;
+    }
+
+    if (!payerMemberId) {
+      setExpenseError("Please choose who paid this bill.");
+      return;
+    }
+
+    let splitsPayload: Array<{ memberId: string; allocatedAmount: number }> | undefined = undefined;
+
+    if (splitMethod === "CUSTOM") {
+      const splitsArray: Array<{ memberId: string; allocatedAmount: number }> = [];
+      let sumCustom = 0;
+
+      for (const member of summary.memberBreakdown) {
+        const val = Number(customSplits[member.id]) || 0;
+        sumCustom += val;
+        splitsArray.push({ memberId: member.id, allocatedAmount: val });
+      }
+
+      if (Math.abs(sumCustom - cleanAmount) > 0.05) {
+        setExpenseError(
+          `Allocations total ₹${sumCustom.toLocaleString("en-IN")} but expense is ₹${cleanAmount.toLocaleString("en-IN")}. Please reconcile the difference.`
+        );
+        return;
+      }
+      splitsPayload = splitsArray;
+    } else {
+      if (selectedParticipants.length === 0) {
+        setExpenseError("Please select at least one participating member.");
+        return;
+      }
+    }
+
+    setSavingExpense(true);
+    try {
+      await addHouseholdExpense(token, summary.householdId, {
+        description: expDescription.trim(),
+        amount: cleanAmount,
+        category: expCategory,
+        expenseDate: expDate ? new Date(expDate).toISOString() : new Date().toISOString(),
+        payerMemberId,
+        splitMethod,
+        participatingMemberIds: splitMethod === "EQUAL" ? selectedParticipants : undefined,
+        splits: splitsPayload,
+      });
+
+      setIsAddingExpense(false);
+      await loadHousehold();
+    } catch (err: any) {
+      console.error("[HouseholdPage] Add expense error:", err);
+      setExpenseError(err?.message || "Failed to record shared expense.");
+    } finally {
+      setSavingExpense(false);
+    }
+  }
+
+  async function handleDeleteExpense(expenseId: string) {
+    if (!summary?.householdId || deletingId) return;
+    setDeletingId(expenseId);
+    try {
+      await deleteHouseholdExpense(token, summary.householdId, expenseId);
+      await loadHousehold();
+    } catch (err: any) {
+      console.error("[HouseholdPage] Delete expense error:", err);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  const numAmount = Number(expAmount.replace(/,/g, "")) || 0;
+  const equalPerPerson =
+    selectedParticipants.length > 0 && numAmount > 0
+      ? (numAmount / selectedParticipants.length).toFixed(2)
+      : "0";
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto py-2">
@@ -96,13 +240,20 @@ function HouseholdContent({ token }: { token: string }) {
             SHARED HOUSEHOLD SPENDING
           </h1>
           <p className="text-xs sm:text-sm text-stone-600 font-medium mt-0.5">
-            Household members share this spending view to track collective monthly outflow.
+            Record rent, utilities, groceries, and shared bills. Transparent splits for partners & roommates.
           </p>
         </div>
 
         {summary && (
           <div className="flex items-center gap-2 self-start sm:self-auto">
-            <span className="rounded-full bg-[#FAF8F5] border border-[#E5DAC4] px-3 py-1 text-[11px] font-mono text-stone-600">
+            <button
+              type="button"
+              onClick={handleOpenExpenseModal}
+              className="inline-flex items-center gap-1.5 rounded-full bg-[#84cc16] px-4 py-2 text-xs font-black text-[#18122B] shadow-sm hover:bg-[#a3e635] hover:scale-105 active:scale-95 transition cursor-pointer"
+            >
+              <span>+ Add Shared Expense</span>
+            </button>
+            <span className="rounded-full bg-[#FAF8F5] border border-[#E5DAC4] px-3 py-1.5 text-[11px] font-mono text-stone-600 font-bold">
               {summary.memberBreakdown.length} Member{summary.memberBreakdown.length === 1 ? "" : "s"}
             </span>
           </div>
@@ -186,10 +337,11 @@ function HouseholdContent({ token }: { token: string }) {
           </form>
         </div>
       ) : (
-        /* STATE B: ACTIVE HOUSEHOLD SUMMARY & INVITE VIEW */
+        /* STATE B: ACTIVE HOUSEHOLD VIEW */
         <div className="space-y-6">
-          {/* Top Metric Strip: Total Spend Hero */}
+          {/* Top Metric Strip: Total Spend Hero & Invite Card */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+            {/* Total Spend Card */}
             <div className="md:col-span-6 rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-5 shadow-xs flex flex-col justify-between">
               <div>
                 <span className="text-[10px] font-black uppercase tracking-wider text-[#18122B]/70 block mb-1">
@@ -200,9 +352,10 @@ function HouseholdContent({ token }: { token: string }) {
                   {formatINR(summary.totalSpend)}
                 </div>
               </div>
-              <p className="text-[11px] text-stone-400 mt-3 font-mono">
-                Aggregated across {summary.memberBreakdown.length} registered member{summary.memberBreakdown.length === 1 ? "" : "s"}
-              </p>
+              <div className="mt-4 pt-3 border-t border-[#E5DAC4]/60 flex items-center justify-between text-[11px] font-mono text-stone-500">
+                <span>{summary.expenses?.length || 0} shared bill{(summary.expenses?.length || 0) === 1 ? "" : "s"}</span>
+                <span>{summary.memberBreakdown.length} member{summary.memberBreakdown.length === 1 ? "" : "s"}</span>
+              </div>
             </div>
 
             {/* Invite Form Card */}
@@ -212,7 +365,7 @@ function HouseholdContent({ token }: { token: string }) {
                   ✦ INVITE A HOUSEHOLD MEMBER
                 </span>
                 <p className="text-xs text-stone-500 font-medium mb-3">
-                  Invite a housemate or partner to share this spending ledger.
+                  Invite a housemate or partner to split bills and share this spending ledger.
                 </p>
 
                 <form onSubmit={handleInvite} className="space-y-2">
@@ -227,40 +380,49 @@ function HouseholdContent({ token }: { token: string }) {
                     </div>
                   )}
 
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
                     <input
                       type="email"
                       placeholder="partner@example.com"
+                      required
                       value={inviteEmail}
                       onChange={(e) => setInviteEmail(e.target.value)}
-                      className="flex-1 rounded-xl border border-[#E5DAC4] bg-white px-3.5 py-2 text-xs text-[#18122B] placeholder:text-stone-400 focus:outline-none focus:border-[#84cc16]"
+                      className="sm:col-span-7 rounded-xl border border-[#E5DAC4] bg-white px-3.5 py-2 text-xs text-[#18122B] placeholder:text-stone-400 focus:outline-none focus:border-[#84cc16]"
                     />
-                    <button
-                      type="submit"
-                      disabled={inviting || !inviteEmail.trim()}
-                      className="rounded-xl bg-[#18122B] px-4 py-2 text-xs font-bold text-white hover:bg-stone-800 disabled:opacity-50 transition cursor-pointer shrink-0"
-                    >
-                      {inviting ? "Inviting…" : "Invite"}
-                    </button>
+                    <input
+                      type="text"
+                      placeholder="Name (optional)"
+                      value={inviteName}
+                      onChange={(e) => setInviteName(e.target.value)}
+                      className="sm:col-span-5 rounded-xl border border-[#E5DAC4] bg-white px-3.5 py-2 text-xs text-[#18122B] placeholder:text-stone-400 focus:outline-none focus:border-[#84cc16]"
+                    />
                   </div>
+
+                  <button
+                    type="submit"
+                    disabled={inviting || !inviteEmail.trim()}
+                    className="w-full rounded-xl bg-[#18122B] py-2 text-xs font-bold text-white hover:bg-stone-800 disabled:opacity-50 transition cursor-pointer"
+                  >
+                    {inviting ? "Inviting…" : "Send Household Invite"}
+                  </button>
                 </form>
               </div>
 
-              <span className="text-[10px] text-stone-400 font-mono mt-3">
-                Household members share this spending view.
+              <span className="text-[10px] text-stone-400 font-mono mt-2">
+                Invited members receive shared view access to this ledger.
               </span>
             </div>
           </div>
 
-          {/* Per-Member Breakdown Table */}
+          {/* Per-Member Breakdown & Settlement Table */}
           <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-5 shadow-xs">
             <div className="flex items-center justify-between border-b border-[#E5DAC4]/60 pb-3 mb-4">
               <div>
                 <span className="text-[10px] font-black uppercase tracking-wider text-[#18122B]/70 block">
-                  ✦ MEMBER LEDGER
+                  ✦ MEMBER LEDGER & BALANCES
                 </span>
                 <h3 className="font-serif text-base font-bold text-[#18122B]">
-                  Per-Member Spending Breakdown
+                  Per-Member Spending & Settlement Status
                 </h3>
               </div>
               <span className="text-[10px] font-mono text-stone-400">
@@ -274,24 +436,58 @@ function HouseholdContent({ token }: { token: string }) {
                   <tr className="border-b border-[#E5DAC4]/80 text-[10px] font-black uppercase tracking-wider text-stone-400">
                     <th className="pb-2.5 pr-4">MEMBER</th>
                     <th className="pb-2.5 pr-4">EMAIL</th>
-                    <th className="pb-2.5 pr-4 text-right">SPEND</th>
+                    <th className="pb-2.5 pr-4 text-right">PAID OUT OF POCKET</th>
+                    <th className="pb-2.5 pr-4 text-right">ALLOCATED SHARE</th>
+                    <th className="pb-2.5 pr-4 text-right">NET BALANCE</th>
                     <th className="pb-2.5 text-right">% OF TOTAL</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100 text-xs">
                   {summary.memberBreakdown.map((member) => {
-                    const sharePct = summary.totalSpend > 0 ? Math.round((member.spend / summary.totalSpend) * 100) : 0;
+                    const sharePct =
+                      summary.totalSpend > 0
+                        ? Math.round((member.spend / summary.totalSpend) * 100)
+                        : 0;
+                    const net = (member.paid || 0) - member.spend;
 
                     return (
                       <tr key={member.id} className="hover:bg-[#FAF8F5]/80 transition">
                         <td className="py-3 pr-4 font-bold text-[#18122B]">
-                          {member.name}
+                          <div className="flex items-center gap-1.5">
+                            <span>{member.name}</span>
+                            {member.role === "OWNER" && (
+                              <span className="rounded-full bg-amber-100 border border-amber-200 px-1.5 py-0.2 text-[9px] font-black uppercase text-amber-800">
+                                Owner
+                              </span>
+                            )}
+                            {member.status === "PENDING" && (
+                              <span className="rounded-full bg-stone-100 border border-stone-200 px-1.5 py-0.2 text-[9px] font-mono text-stone-500">
+                                Pending
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 pr-4 font-mono text-stone-500 text-[11px]">
                           {member.email}
                         </td>
                         <td className="py-3 pr-4 font-serif font-bold text-[#18122B] text-right">
+                          {formatINR(member.paid || 0)}
+                        </td>
+                        <td className="py-3 pr-4 font-serif font-bold text-[#18122B] text-right">
                           {formatINR(member.spend)}
+                        </td>
+                        <td className="py-3 pr-4 text-right font-mono font-bold text-[11px]">
+                          {net > 0 ? (
+                            <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                              + {formatINR(net)} (gets back)
+                            </span>
+                          ) : net < 0 ? (
+                            <span className="text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                              - {formatINR(Math.abs(net))} (owes)
+                            </span>
+                          ) : (
+                            <span className="text-stone-400">Settled</span>
+                          )}
                         </td>
                         <td className="py-3 text-right font-mono font-semibold text-stone-600">
                           {sharePct}%
@@ -302,11 +498,364 @@ function HouseholdContent({ token }: { token: string }) {
                 </tbody>
               </table>
             </div>
+          </div>
+
+          {/* Shared Expenses List */}
+          <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-5 shadow-xs">
+            <div className="flex items-center justify-between border-b border-[#E5DAC4]/60 pb-3 mb-4">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#18122B]/70 block">
+                  ✦ SHARED EXPENSES
+                </span>
+                <h3 className="font-serif text-base font-bold text-[#18122B]">
+                  Recorded Household Bills & Splits
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenExpenseModal}
+                className="text-xs font-bold text-[#3f6212] hover:underline cursor-pointer"
+              >
+                + Add Bill
+              </button>
+            </div>
+
+            {!summary.expenses || summary.expenses.length === 0 ? (
+              /* REQUIRED HONEST EMPTY STATE */
+              <div className="py-10 px-4 text-center">
+                <div className="mx-auto w-12 h-12 rounded-full bg-[#84cc16]/15 border border-[#84cc16]/30 flex items-center justify-center text-2xl mb-3">
+                  ✨
+                </div>
+                <h4 className="font-serif text-lg font-bold text-[#18122B]">
+                  Your household ledger is fresh ✦
+                </h4>
+                <p className="text-xs text-stone-500 font-medium max-w-md mx-auto mt-1">
+                  No shared bills recorded this month. Add rent, electricity, groceries, or another shared expense to start splitting costs.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleOpenExpenseModal}
+                  className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#18122B] px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-stone-800 transition cursor-pointer"
+                >
+                  <span>+ Add Shared Expense</span>
+                  <span className="text-[#84cc16]">&rarr;</span>
+                </button>
+              </div>
+            ) : (
+              <div className="divide-y divide-stone-100">
+                {summary.expenses.map((expense) => {
+                  const d = new Date(expense.expenseDate);
+                  const dateStr = d.toLocaleDateString("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  });
+
+                  return (
+                    <div
+                      key={expense.id}
+                      className="py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 hover:bg-[#FAF8F5]/80 transition px-2 rounded-xl"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="h-9 w-9 rounded-xl bg-[#FAF8F5] border border-[#E5DAC4] flex items-center justify-center text-base shrink-0">
+                          {expense.category.toLowerCase().includes("rent")
+                            ? "🏠"
+                            : expense.category.toLowerCase().includes("util") || expense.category.toLowerCase().includes("bill")
+                            ? "⚡"
+                            : expense.category.toLowerCase().includes("food") || expense.category.toLowerCase().includes("groc")
+                            ? "🛒"
+                            : expense.category.toLowerCase().includes("wifi") || expense.category.toLowerCase().includes("internet")
+                            ? "🌐"
+                            : "🧾"}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs text-[#18122B]">
+                              {expense.description}
+                            </span>
+                            <span className="rounded-full bg-stone-100 border border-stone-200 px-2 py-0.2 text-[10px] font-medium text-stone-600">
+                              {expense.category}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-stone-500 font-mono mt-0.5">
+                            <span>Paid by {expense.payerMemberName}</span> &middot; <span>{dateStr}</span>
+                          </div>
+                          {expense.splits && expense.splits.length > 0 && (
+                            <div className="text-[10px] text-stone-400 font-mono mt-0.5">
+                              Split: {expense.splits.map((s) => `${s.memberName}: ${formatINR(s.allocatedAmount)}`).join(" | ")}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-4 self-end sm:self-center">
+                        <div className="text-right">
+                          <div className="font-serif font-bold text-sm sm:text-base text-[#18122B]">
+                            {formatINR(expense.amount)}
+                          </div>
+                          <div className="text-[10px] font-mono text-stone-400">
+                            {expense.splitMethod === "EQUAL" ? "Equal Split" : "Custom Split"}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={deletingId === expense.id}
+                          onClick={() => handleDeleteExpense(expense.id)}
+                          aria-label="Delete shared expense"
+                          className="text-stone-300 hover:text-rose-600 p-1 transition cursor-pointer text-xs"
+                          title="Delete expense"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="mt-4 pt-3 border-t border-[#E5DAC4]/60 flex items-center justify-between text-[10px] text-stone-400 font-mono">
-              <span>One ledger &middot; Transparent household totals</span>
+              <span>Each shared expense is counted exactly once in total outflow</span>
               <span>FinSage Shared Ledger</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4. ADD SHARED EXPENSE MODAL */}
+      {isAddingExpense && summary && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#18122B]/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-lg rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-[#E5DAC4]/60 pb-3">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#3f6212] block">
+                  ✦ RECORD SHARED BILL
+                </span>
+                <h3 className="font-serif text-lg font-bold text-[#18122B]">
+                  Add Household Expense
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddingExpense(false)}
+                className="text-stone-400 hover:text-stone-700 text-sm p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {expenseError && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 font-medium">
+                {expenseError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveExpense} className="space-y-3.5 text-xs">
+              {/* Description */}
+              <div>
+                <label className="block font-bold text-[#18122B] mb-1">
+                  Description
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. October Apartment Rent, Electricity Bill, Groceries"
+                  value={expDescription}
+                  onChange={(e) => setExpDescription(e.target.value)}
+                  className="w-full rounded-xl border border-[#E5DAC4] bg-white px-3.5 py-2 text-xs font-medium text-[#18122B] placeholder:text-stone-400 focus:outline-none focus:border-[#84cc16]"
+                />
+              </div>
+
+              {/* Amount & Category */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#18122B] mb-1">
+                    Total Amount (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="1"
+                    required
+                    placeholder="e.g. 20000"
+                    value={expAmount}
+                    onChange={(e) => setExpAmount(e.target.value)}
+                    className="w-full rounded-xl border border-[#E5DAC4] bg-white px-3.5 py-2 text-xs font-medium text-[#18122B] placeholder:text-stone-400 focus:outline-none focus:border-[#84cc16]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-[#18122B] mb-1">
+                    Category
+                  </label>
+                  <select
+                    value={expCategory}
+                    onChange={(e) => setExpCategory(e.target.value)}
+                    className="w-full rounded-xl border border-[#E5DAC4] bg-white px-3.5 py-2 text-xs font-medium text-[#18122B] focus:outline-none focus:border-[#84cc16]"
+                  >
+                    {EXPENSE_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Date & Who Paid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#18122B] mb-1">
+                    Expense Date
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={expDate}
+                    onChange={(e) => setExpDate(e.target.value)}
+                    className="w-full rounded-xl border border-[#E5DAC4] bg-white px-3.5 py-2 text-xs font-medium text-[#18122B] focus:outline-none focus:border-[#84cc16]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-[#18122B] mb-1">
+                    Who Paid?
+                  </label>
+                  <select
+                    value={payerMemberId}
+                    onChange={(e) => setPayerMemberId(e.target.value)}
+                    className="w-full rounded-xl border border-[#E5DAC4] bg-white px-3.5 py-2 text-xs font-medium text-[#18122B] focus:outline-none focus:border-[#84cc16]"
+                  >
+                    {summary.memberBreakdown.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} ({m.email})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Split Method Toggle */}
+              <div className="pt-2 border-t border-[#E5DAC4]/60">
+                <label className="block font-bold text-[#18122B] mb-1.5">
+                  Split Method
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSplitMethod("EQUAL")}
+                    className={`rounded-xl py-2 px-3 text-xs font-bold transition ${
+                      splitMethod === "EQUAL"
+                        ? "bg-[#18122B] text-white"
+                        : "border border-[#E5DAC4] bg-white text-stone-600 hover:bg-[#FAF8F5]"
+                    }`}
+                  >
+                    Split Equally ({equalPerPerson > "0" ? `₹${Number(equalPerPerson).toLocaleString("en-IN")}/person` : "Equal"})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSplitMethod("CUSTOM")}
+                    className={`rounded-xl py-2 px-3 text-xs font-bold transition ${
+                      splitMethod === "CUSTOM"
+                        ? "bg-[#18122B] text-white"
+                        : "border border-[#E5DAC4] bg-white text-stone-600 hover:bg-[#FAF8F5]"
+                    }`}
+                  >
+                    Custom Amounts
+                  </button>
+                </div>
+              </div>
+
+              {/* Split Details */}
+              {splitMethod === "EQUAL" ? (
+                <div className="rounded-xl border border-[#E5DAC4] bg-[#FAF8F5] p-3 space-y-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-stone-400 block">
+                    Participating Members
+                  </span>
+                  <div className="space-y-1.5">
+                    {summary.memberBreakdown.map((m) => {
+                      const checked = selectedParticipants.includes(m.id);
+                      return (
+                        <label
+                          key={m.id}
+                          className="flex items-center justify-between cursor-pointer text-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedParticipants([...selectedParticipants, m.id]);
+                                } else {
+                                  setSelectedParticipants(
+                                    selectedParticipants.filter((id) => id !== m.id)
+                                  );
+                                }
+                              }}
+                              className="rounded border-[#E5DAC4] text-[#18122B] accent-[#18122B]"
+                            />
+                            <span className="font-semibold text-[#18122B]">{m.name}</span>
+                          </div>
+                          {checked && numAmount > 0 && (
+                            <span className="font-mono text-stone-500 font-bold">
+                              ₹{Number(equalPerPerson).toLocaleString("en-IN")}
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-[#E5DAC4] bg-[#FAF8F5] p-3 space-y-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-stone-400 block">
+                    Custom Member Amounts (Sum must equal ₹{numAmount.toLocaleString("en-IN")})
+                  </span>
+                  <div className="space-y-2">
+                    {summary.memberBreakdown.map((m) => (
+                      <div key={m.id} className="flex items-center justify-between gap-3">
+                        <span className="font-semibold text-xs text-[#18122B]">{m.name}</span>
+                        <div className="flex items-center gap-1">
+                          <span className="text-stone-400 font-mono">₹</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="0"
+                            value={customSplits[m.id] || ""}
+                            onChange={(e) =>
+                              setCustomSplits({ ...customSplits, [m.id]: e.target.value })
+                            }
+                            className="w-28 rounded-lg border border-[#E5DAC4] bg-white px-2 py-1 text-xs font-mono text-right font-bold text-[#18122B] focus:outline-none focus:border-[#84cc16]"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-[#E5DAC4]/60">
+                <button
+                  type="button"
+                  onClick={() => setIsAddingExpense(false)}
+                  className="rounded-xl border border-[#E5DAC4] px-4 py-2 text-xs font-bold text-stone-600 hover:bg-stone-100 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingExpense}
+                  className="rounded-xl bg-[#84cc16] px-5 py-2 text-xs font-black text-[#18122B] shadow-sm hover:bg-[#a3e635] transition disabled:opacity-50"
+                >
+                  {savingExpense ? "Recording…" : "Save Shared Expense"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

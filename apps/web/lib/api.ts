@@ -1165,7 +1165,11 @@ export interface HouseholdMember {
   id: string;
   name?: string;
   email: string;
+  role?: string;
+  status?: string;
   spend?: number;
+  paid?: number;
+  netBalance?: number;
   joinedAt?: string;
   [key: string]: any;
 }
@@ -1180,11 +1184,34 @@ export interface Household {
 
 export interface HouseholdMemberSpend {
   id: string;
+  userId?: string | null;
   name: string;
   email: string;
+  role?: string;
+  status?: string;
   spend: number;
+  paid?: number;
+  netBalance?: number;
   transactionCount?: number;
+  joinedAt?: string;
   [key: string]: any;
+}
+
+export interface HouseholdExpenseItem {
+  id: string;
+  description: string;
+  amount: number;
+  category: string;
+  expenseDate: string;
+  splitMethod: string;
+  payerMemberId: string;
+  payerMemberName?: string;
+  splits?: Array<{
+    memberId: string;
+    memberName?: string;
+    allocatedAmount: number;
+  }>;
+  createdAt?: string;
 }
 
 export interface HouseholdSummary {
@@ -1192,12 +1219,12 @@ export interface HouseholdSummary {
   name?: string;
   totalSpend: number;
   memberBreakdown: HouseholdMemberSpend[];
+  expenses?: HouseholdExpenseItem[];
   [key: string]: any;
 }
 
 const PROGRESS_STORAGE_KEY = "finsage_user_progress";
 const MISSIONS_STORAGE_KEY = "finsage_missions_list";
-const HOUSEHOLD_STORAGE_KEY = "finsage_household_data";
 
 export async function getProgress(token: string): Promise<UserProgress> {
   try {
@@ -1338,113 +1365,91 @@ export async function updateMissionProgress(token: string, id: string, value: nu
 }
 
 export async function createHousehold(token: string, name: string): Promise<Household> {
-  try {
-    const res = await fetch(`${BFF_URL}/api/v1/households`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      body: JSON.stringify({ name }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (typeof window !== "undefined") {
-        localStorage.setItem(HOUSEHOLD_STORAGE_KEY, JSON.stringify(data));
-      }
-      return data;
-    }
-  } catch (err) {
-    console.warn("[createHousehold] Backend error, creating local household:", err);
+  const res = await fetch(`${BFF_URL}/api/v1/households`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to create household");
   }
-
-  const newHousehold: Household = {
-    id: `hh_${Date.now()}`,
-    name,
-    createdAt: new Date().toISOString(),
-    members: [
-      { id: "usr_owner", name: "Primary Member", email: "user@finsage.ai", spend: 42500 },
-    ],
-  };
-
-  if (typeof window !== "undefined") {
-    localStorage.setItem(HOUSEHOLD_STORAGE_KEY, JSON.stringify(newHousehold));
-  }
-  return newHousehold;
+  return res.json();
 }
 
-export async function inviteToHousehold(token: string, householdId: string, email: string): Promise<{ success: boolean; member?: HouseholdMember }> {
-  try {
-    const res = await fetch(`${BFF_URL}/api/v1/households/${householdId}/invite`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders(token) },
-      body: JSON.stringify({ email }),
-    });
-    if (res.ok) {
-      return res.json();
-    }
-  } catch (err) {
-    console.warn("[inviteToHousehold] Backend error, recording local invitation:", err);
+export async function inviteToHousehold(
+  token: string,
+  householdId: string,
+  email: string,
+  name?: string
+): Promise<{ success: boolean; member?: HouseholdMember }> {
+  const res = await fetch(`${BFF_URL}/api/v1/households/${householdId}/invite`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify({ email, name }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to send invitation");
   }
-
-  // Local fallback
-  if (typeof window !== "undefined") {
-    try {
-      const raw = localStorage.getItem(HOUSEHOLD_STORAGE_KEY);
-      if (raw) {
-        const hh: Household = JSON.parse(raw);
-        const newMember: HouseholdMember = {
-          id: `usr_${Date.now()}`,
-          name: email.split("@")[0],
-          email,
-          spend: 18400,
-          joinedAt: new Date().toISOString(),
-        };
-        hh.members = [...(hh.members || []), newMember];
-        localStorage.setItem(HOUSEHOLD_STORAGE_KEY, JSON.stringify(hh));
-        return { success: true, member: newMember };
-      }
-    } catch {}
-  }
-
-  return { success: true };
+  return res.json();
 }
 
 export async function getHouseholdSummary(token: string, householdId?: string): Promise<HouseholdSummary | null> {
   const query = householdId ? `?householdId=${householdId}` : "";
-  try {
-    const res = await fetch(`${BFF_URL}/api/v1/households/summary${query}`, {
-      headers: authHeaders(token),
-      cache: "no-store",
-    });
-    if (res.ok) {
-      return res.json();
-    }
-  } catch (err) {
-    console.warn("[getHouseholdSummary] Backend error, loading client summary:", err);
+  const res = await fetch(`${BFF_URL}/api/v1/households/summary${query}`, {
+    headers: authHeaders(token),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    return null;
   }
+  const data = await res.json();
+  return data;
+}
 
-  if (typeof window !== "undefined") {
-    try {
-      const raw = localStorage.getItem(HOUSEHOLD_STORAGE_KEY);
-      if (raw) {
-        const hh: Household = JSON.parse(raw);
-        const members: HouseholdMemberSpend[] = (hh.members || []).map((m, idx) => ({
-          id: m.id || `m_${idx}`,
-          name: m.name || m.email.split("@")[0],
-          email: m.email,
-          spend: m.spend !== undefined ? m.spend : idx === 0 ? 42500 : 26000,
-          transactionCount: idx === 0 ? 18 : 12,
-        }));
-        const total = members.reduce((sum, m) => sum + m.spend, 0);
-        return {
-          householdId: hh.id,
-          name: hh.name,
-          totalSpend: total,
-          memberBreakdown: members,
-        };
-      }
-    } catch {}
+export async function addHouseholdExpense(
+  token: string,
+  householdId: string,
+  data: {
+    description: string;
+    amount: number;
+    category?: string;
+    expenseDate?: string;
+    payerMemberId: string;
+    splitMethod?: "EQUAL" | "CUSTOM";
+    participatingMemberIds?: string[];
+    splits?: Array<{ memberId: string; allocatedAmount: number }>;
   }
+): Promise<HouseholdExpenseItem> {
+  const res = await fetch(`${BFF_URL}/api/v1/households/${householdId}/expenses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to record shared expense");
+  }
+  notifyGamificationUpdate();
+  return res.json();
+}
 
-  return null;
+export async function deleteHouseholdExpense(
+  token: string,
+  householdId: string,
+  expenseId: string
+): Promise<{ success: boolean }> {
+  const res = await fetch(`${BFF_URL}/api/v1/households/${householdId}/expenses/${expenseId}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to delete shared expense");
+  }
+  notifyGamificationUpdate();
+  return res.json();
 }
 
 

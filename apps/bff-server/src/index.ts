@@ -18,6 +18,8 @@ import analyticsRoutes from "./routes/analytics.routes";
 import reportsRoutes from "./routes/reports.routes";
 // Phase 6 routes
 import marketRoutes from "./routes/market.routes";
+import progressRoutes from "./routes/progress.routes";
+import householdsRoutes from "./routes/households.routes";
 import { workerLoop } from "./workers/document.worker";
 
 dotenv.config();
@@ -48,6 +50,8 @@ app.use("/api/v1/analytics", analyticsRoutes);
 app.use("/api/v1/reports", reportsRoutes);
 // Phase 6
 app.use("/api/v1/market", marketRoutes);
+app.use("/api/v1/progress", progressRoutes);
+app.use("/api/v1/households", householdsRoutes);
 
 app.listen(PORT, () => {
   console.log(`[bff-server] listening on http://localhost:${PORT}`);
