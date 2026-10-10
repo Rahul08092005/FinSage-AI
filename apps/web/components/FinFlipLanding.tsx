@@ -76,7 +76,7 @@ export function FinFlipLanding() {
 
               {/* Supporting Copy (Compact, readable, well-paced) */}
               <p className="mt-3 sm:mt-4 max-w-lg text-sm sm:text-base lg:text-[15px] xl:text-[16px] leading-relaxed text-[#18122B]/80 font-normal">
-                An AI-powered personal financial workspace that helps you understand spending, organize expenses, track financial activity, and get personalized financial guidance.
+                Track every rupee. Make smarter moves. Build a money life that works for you.
               </p>
 
               {/* Primary & Secondary CTAs (Prominently visible above the fold) */}
@@ -98,11 +98,13 @@ export function FinFlipLanding() {
 
               {/* Subtle Product-Value Row */}
               <div className="mt-3.5 sm:mt-4 flex flex-wrap items-center gap-2 text-[10px] sm:text-[11px] font-black tracking-wider text-[#18122B]/60 uppercase">
-                <span>AI-POWERED INSIGHTS</span>
+                <span>AI MONEY INSIGHTS</span>
                 <span className="text-[#84cc16] font-bold">/</span>
-                <span>EXPENSE TRACKING</span>
+                <span>SMART BUDGETING</span>
                 <span className="text-[#84cc16] font-bold">/</span>
-                <span>PERSONAL FINANCIAL WORKSPACE</span>
+                <span>GOAL TRACKING</span>
+                <span className="text-[#84cc16] font-bold">/</span>
+                <span>FINANCIAL PLANNING</span>
               </div>
             </div>
 
