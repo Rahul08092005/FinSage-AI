@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { getProgress, UserProgress } from "@/lib/api";
+import { getMe, getProgress, UserProgress } from "@/lib/api";
 
 export function Navbar() {
   const [token, setToken] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
   const [progress, setProgress] = useState<UserProgress | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const pathname = usePathname();
@@ -18,14 +19,38 @@ export function Navbar() {
       setToken(storedToken);
       if (storedToken) {
         getProgress(storedToken).then((p) => setProgress(p)).catch(() => {});
+        getMe(storedToken)
+          .then((u) => {
+            if (u && u.name) {
+              setUserName(u.name);
+            } else {
+              setUserName(null);
+            }
+          })
+          .catch(() => {
+            setUserName(null);
+          });
+      } else {
+        setUserName(null);
+        setProgress(null);
       }
     }
   }, [pathname]);
 
   function handleLogout() {
     localStorage.removeItem("finsage_token");
+    setToken(null);
+    setUserName(null);
+    setProgress(null);
     window.location.href = "/";
   }
+
+  const displayName = userName || (token ? "My Account" : "");
+  const avatarInitial = userName
+    ? userName.trim().charAt(0).toUpperCase()
+    : token
+    ? "✦"
+    : "";
 
   const isAppRoute =
     pathname?.startsWith("/dashboard") ||
@@ -130,10 +155,10 @@ export function Navbar() {
 
               {/* User indicator chip */}
               <div className="hidden sm:flex items-center gap-2 rounded-full border border-[#DDD9CF] bg-white px-3 py-1 text-xs font-semibold text-[#18122B]">
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#18122B] text-[10px] font-bold text-white">
-                  D
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#18122B] text-[10px] font-bold text-white uppercase">
+                  {avatarInitial}
                 </span>
-                <span>Demo User</span>
+                <span className="max-w-[140px] truncate">{displayName}</span>
                 <span className="h-2 w-2 rounded-full bg-[#84cc16]" title="Workspace Connected" />
               </div>
 
@@ -201,6 +226,13 @@ export function Navbar() {
           <div className="flex flex-col gap-2 px-2 text-xs font-semibold text-[#18122B]/80">
             {token && isAppRoute ? (
               <>
+                <div className="flex items-center gap-2 px-2 py-1 text-xs font-bold text-[#18122B] mb-1">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#18122B] text-[10px] font-bold text-white uppercase">
+                    {avatarInitial}
+                  </span>
+                  <span className="truncate">{displayName}</span>
+                  <span className="h-2 w-2 rounded-full bg-[#84cc16]" />
+                </div>
                 {navLinks.map((link) => {
                   const isActive = pathname === link.href || pathname?.startsWith(`${link.href}/`);
                   return (

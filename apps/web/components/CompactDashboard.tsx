@@ -49,7 +49,7 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
   const [loading, setLoading] = useState(true);
 
   // Core Data
-  const [userName, setUserName] = useState<string>("Demo User");
+  const [userName, setUserName] = useState<string>("");
   const [salary, setSalary] = useState<number | null>(null);
   const [spend, setSpend] = useState<number>(0);
   const [categories, setCategories] = useState<Array<{ category: string; total: number; count: number }>>([]);
@@ -210,10 +210,9 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
   // Dynamic greeting based on time of day
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
-    if (hour < 12) return "Good morning! ✦";
-    if (hour < 17) return "Good afternoon! ✦";
-    return "Good evening! ✦";
-  }, []);
+    const timeWord = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+    return userName ? `${timeWord}, ${userName}! ✦` : `${timeWord}! ✦`;
+  }, [userName]);
 
   // Salary Edit Modal Handlers
   const handleOpenSalaryModal = () => {
