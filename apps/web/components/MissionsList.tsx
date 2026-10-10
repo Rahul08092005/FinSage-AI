@@ -89,10 +89,10 @@ export function MissionsList({ token }: MissionsListProps) {
   const activeMissions = missions.filter((m) => m.status === "active");
   const completedMissions = missions.filter((m) => m.status === "completed");
 
-  const level = progress?.level ?? 3;
-  const xp = progress?.xp ?? 240;
-  const nextLevelXp = progress?.nextLevelXp ?? 500;
-  const pct = Math.min(100, Math.round((xp / nextLevelXp) * 100));
+  const level = progress?.level ?? 1;
+  const xp = progress?.xp ?? 0;
+  const nextLevelXp = progress?.nextLevelXp ?? 100;
+  const pct = Math.min(100, Math.max(0, progress?.progressPercent ?? Math.round((xp / nextLevelXp) * 100)));
 
   return (
     <div className="rounded-2xl border border-[#E5DAC4] bg-[#FFFDF8] p-4 sm:p-5 shadow-xs space-y-4">

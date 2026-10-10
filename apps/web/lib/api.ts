@@ -53,6 +53,12 @@ export async function getTransactions(token: string, limit = 100) {
   return res.json();
 }
 
+export function notifyGamificationUpdate() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("finsage_gamification_updated"));
+  }
+}
+
 export async function createTransaction(
   token: string,
   data: {
@@ -70,7 +76,9 @@ export async function createTransaction(
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to create transaction");
-  return res.json();
+  const result = await res.json();
+  notifyGamificationUpdate();
+  return result;
 }
 
 export async function getBudgetVariance(token: string) {
@@ -89,7 +97,9 @@ export async function upsertBudget(token: string, data: { category: string; mont
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to save budget");
-  return res.json();
+  const result = await res.json();
+  notifyGamificationUpdate();
+  return result;
 }
 
 export async function getGoals(token: string) {
@@ -108,7 +118,9 @@ export async function createGoal(token: string, data: { title: string; targetAmo
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to create goal");
-  return res.json();
+  const result = await res.json();
+  notifyGamificationUpdate();
+  return result;
 }
 
 export async function getBudgets(token: string) {
@@ -126,6 +138,7 @@ export async function deleteTransaction(token: string, id: string) {
     headers: authHeaders(token),
   });
   if (!res.ok) throw new Error("Failed to delete transaction");
+  notifyGamificationUpdate();
 }
 
 export async function updateTransaction(
@@ -1196,26 +1209,18 @@ export async function getProgress(token: string): Promise<UserProgress> {
       return res.json();
     }
   } catch (err) {
-    console.warn("[getProgress] Backend fetch error, using client progress state:", err);
+    console.warn("[getProgress] Backend fetch error, using safe neutral state:", err);
   }
 
-  // Fallback to local storage or baseline
-  if (typeof window !== "undefined") {
-    try {
-      const raw = localStorage.getItem(PROGRESS_STORAGE_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch {}
-  }
-
-  const baseline: UserProgress = {
-    level: 3,
-    xp: 240,
-    nextLevelXp: 500,
-    currentStreak: 5,
-    xpToNextLevel: 260,
-    progressPercent: 48,
+  const neutralBaseline: UserProgress = {
+    level: 1,
+    xp: 0,
+    nextLevelXp: 100,
+    currentStreak: 0,
+    xpToNextLevel: 100,
+    progressPercent: 0,
   };
-  return baseline;
+  return neutralBaseline;
 }
 
 function getStoredMissions(): Mission[] {

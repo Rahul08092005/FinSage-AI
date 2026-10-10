@@ -14,27 +14,46 @@ export function Navbar() {
   const pathname = usePathname();
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const storedToken = localStorage.getItem("finsage_token");
-      setToken(storedToken);
-      if (storedToken) {
-        getProgress(storedToken).then((p) => setProgress(p)).catch(() => {});
-        getMe(storedToken)
-          .then((u) => {
-            if (u && u.name) {
-              setUserName(u.name);
-            } else {
-              setUserName(null);
-            }
-          })
-          .catch(() => {
-            setUserName(null);
-          });
-      } else {
-        setUserName(null);
-        setProgress(null);
-      }
+    if (typeof window === "undefined") return;
+
+    const storedToken = localStorage.getItem("finsage_token");
+    setToken(storedToken);
+
+    function fetchGamification(tok: string) {
+      getProgress(tok)
+        .then((p) => setProgress(p))
+        .catch(() => {});
     }
+
+    if (storedToken) {
+      fetchGamification(storedToken);
+      getMe(storedToken)
+        .then((u) => {
+          if (u && u.name) {
+            setUserName(u.name);
+          } else {
+            setUserName(null);
+          }
+        })
+        .catch(() => {
+          setUserName(null);
+        });
+    } else {
+      setUserName(null);
+      setProgress(null);
+    }
+
+    const handleGamificationUpdate = () => {
+      const currentToken = localStorage.getItem("finsage_token");
+      if (currentToken) {
+        fetchGamification(currentToken);
+      }
+    };
+
+    window.addEventListener("finsage_gamification_updated", handleGamificationUpdate);
+    return () => {
+      window.removeEventListener("finsage_gamification_updated", handleGamificationUpdate);
+    };
   }, [pathname]);
 
   function handleLogout() {
@@ -146,7 +165,7 @@ export function Navbar() {
                     <div className="h-1 w-16 overflow-hidden rounded-full bg-[#E5DAC4]/60">
                       <div
                         className="h-full bg-[#84cc16] transition-all duration-300"
-                        style={{ width: `${Math.min(100, Math.round((progress.xp / progress.nextLevelXp) * 100))}%` }}
+                        style={{ width: `${Math.min(100, Math.max(0, progress.progressPercent ?? Math.round((progress.xp / progress.nextLevelXp) * 100)))}%` }}
                       />
                     </div>
                   </div>
