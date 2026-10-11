@@ -101,6 +101,11 @@ export function Navbar() {
         <div className="flex items-center gap-8 lg:gap-10">
           <Link
             href={token ? "/dashboard" : "/"}
+            onClick={() => {
+              if (!token && (pathname === "/" || pathname === "")) {
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }
+            }}
             className="flex items-center gap-2 group transition-opacity"
           >
             <span className="font-serif text-2xl font-black tracking-tight text-[#18122B]">
@@ -138,11 +143,7 @@ export function Navbar() {
               <>
                 <a href="#features" className="font-medium text-[#18122B]/75 transition hover:text-[#18122B]">Features</a>
                 <a href="#how-it-works" className="font-medium text-[#18122B]/75 transition hover:text-[#18122B]">How It Works</a>
-                <a href="#ocr" className="font-medium text-[#18122B]/75 transition hover:text-[#18122B]">OCR Capture</a>
-                <a href="#advisor" className="font-medium text-[#18122B]/75 transition hover:text-[#18122B]">AI Advisor</a>
-                <a href="#splitwise" className="font-medium text-[#18122B]/75 transition hover:text-[#18122B]">Splitwise</a>
-                <a href="#knowledge" className="font-medium text-[#18122B]/75 transition hover:text-[#18122B]">Knowledge</a>
-                <a href="#showcase" className="font-medium text-[#18122B]/75 transition hover:text-[#18122B]">Product</a>
+                <a href="#privacy" className="font-medium text-[#18122B]/75 transition hover:text-[#18122B]">Privacy & Trust</a>
               </>
             )}
           </nav>
@@ -284,11 +285,7 @@ export function Navbar() {
               <>
                 <a href="#features" onClick={() => setMobileMenuOpen(false)} className="py-1 hover:text-[#18122B]">Features</a>
                 <a href="#how-it-works" onClick={() => setMobileMenuOpen(false)} className="py-1 hover:text-[#18122B]">How It Works</a>
-                <a href="#ocr" onClick={() => setMobileMenuOpen(false)} className="py-1 hover:text-[#18122B]">OCR Capture</a>
-                <a href="#advisor" onClick={() => setMobileMenuOpen(false)} className="py-1 hover:text-[#18122B]">AI Advisor</a>
-                <a href="#splitwise" onClick={() => setMobileMenuOpen(false)} className="py-1 hover:text-[#18122B]">Splitwise</a>
-                <a href="#knowledge" onClick={() => setMobileMenuOpen(false)} className="py-1 hover:text-[#18122B]">Knowledge</a>
-                <a href="#showcase" onClick={() => setMobileMenuOpen(false)} className="py-1 hover:text-[#18122B]">Product</a>
+                <a href="#privacy" onClick={() => setMobileMenuOpen(false)} className="py-1 hover:text-[#18122B]">Privacy & Trust</a>
               </>
             )}
           </div>
