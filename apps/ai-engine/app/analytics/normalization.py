@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from typing import Any
 
@@ -9,16 +10,25 @@ def normalize_transaction(raw: dict[str, Any], source: str) -> dict[str, Any]:
     category = raw.get("category") or categorize_transaction(description)
 
     date_value = raw.get("date") or raw.get("transactionDate")
-    if isinstance(date_value, str):
+    if source == "ocr":
+        if isinstance(date_value, str) and (re.match(r"^\d{4}-\d{2}-\d{2}$", date_value) or date_value == ""):
+            pass
+        elif isinstance(date_value, datetime):
+            date_value = date_value.strftime("%Y-%m-%d")
+    elif isinstance(date_value, str):
         date_value = datetime.fromisoformat(date_value.replace("Z", "+00:00"))
 
-    return {
+    res: dict[str, Any] = {
         "date": date_value,
         "description": description,
         "amount": float(raw.get("amount", 0)),
         "category": category,
         "source": source,
     }
+    for field in ("merchant", "payment_mode", "payment_details", "amount_verified"):
+        if field in raw:
+            res[field] = raw[field]
+    return res
 
 
 def normalize_batch(raw_rows: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:

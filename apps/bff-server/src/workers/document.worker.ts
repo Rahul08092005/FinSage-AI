@@ -76,7 +76,9 @@ export async function processJob(job: DocumentJob): Promise<void> {
     const hasValidMerchant = firstTx && Boolean(firstTx.merchant || firstTx.description);
 
     // High confidence: overall score >= 0.85 AND valid positive amount AND merchant/date
-    const isConfident = confidence >= CONFIDENCE_THRESHOLD && hasValidAmount && hasValidDate;
+    // AND amount verified (do not auto-post unverified or contradicted amounts; route to NEEDS_REVIEW)
+    const isAmountVerified = firstTx?.amount_verified !== false;
+    const isConfident = confidence >= CONFIDENCE_THRESHOLD && hasValidAmount && hasValidDate && isAmountVerified;
     const finalStatus = isConfident ? "COMPLETED" : "NEEDS_REVIEW";
 
     let createdTransactionId: string | null = doc.transactionId || null;
@@ -84,7 +86,17 @@ export async function processJob(job: DocumentJob): Promise<void> {
     // 3. Idempotent Transaction Creation: only if COMPLETED and not already created
     if (isConfident && hasValidAmount && !createdTransactionId) {
       try {
-        const txDate = firstTx.date || firstTx.transactionDate ? new Date(firstTx.date || firstTx.transactionDate) : new Date();
+        // Date parsing: When parsing YYYY-MM-DD date-only strings, parse at UTC noon (12:00:00Z)
+        // to prevent timezone offsets from rolling the calendar day back to the previous day in local or UTC display.
+        const rawDateVal = firstTx.date || firstTx.transactionDate;
+        let txDate: Date;
+        if (typeof rawDateVal === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rawDateVal.trim())) {
+          txDate = new Date(`${rawDateVal.trim()}T12:00:00.000Z`);
+        } else if (rawDateVal) {
+          txDate = new Date(rawDateVal);
+        } else {
+          txDate = new Date();
+        }
         const baseDescription = (firstTx.merchant || firstTx.description || doc.title).slice(0, 500);
 
         // Check if user has an account matching the payment mode

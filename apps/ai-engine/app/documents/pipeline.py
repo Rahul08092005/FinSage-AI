@@ -116,14 +116,19 @@ def process_document(file_path: str, doc_type: str) -> dict[str, Any]:
 
     # Restore None for amount if raw was None (normalize_batch turns missing to 0.0)
     for idx, row in enumerate(raw_rows):
-        if idx < len(normalised) and row.get("amount") is None:
-            normalised[idx]["amount"] = None
-        if idx < len(normalised) and row.get("merchant"):
-            normalised[idx]["merchant"] = row["merchant"]
-        if idx < len(normalised) and row.get("payment_mode"):
-            normalised[idx]["payment_mode"] = row["payment_mode"]
-        if idx < len(normalised) and row.get("payment_details"):
-            normalised[idx]["payment_details"] = row["payment_details"]
+        if idx < len(normalised):
+            if row.get("amount") is None:
+                normalised[idx]["amount"] = None
+            if row.get("date") is None or row.get("date") == "":
+                normalised[idx]["date"] = None
+            if row.get("merchant"):
+                normalised[idx]["merchant"] = row["merchant"]
+            if row.get("payment_mode"):
+                normalised[idx]["payment_mode"] = row["payment_mode"]
+            if row.get("payment_details"):
+                normalised[idx]["payment_details"] = row["payment_details"]
+            if "amount_verified" in row:
+                normalised[idx]["amount_verified"] = row["amount_verified"]
 
     logger.info(f"[OCR] Processing completed: rows={len(normalised)}, confidence={confidence}")
 

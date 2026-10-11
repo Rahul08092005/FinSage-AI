@@ -16,6 +16,20 @@ from app.documents.preprocessor import preprocess_image_for_ocr
 logger = logging.getLogger("finsage.ocr.adapter")
 
 
+def _score_ocr_quality(text: str) -> int:
+    if not text:
+        return 0
+    score = len(text)
+    lower = text.lower()
+    for kw in ["total", "subtotal", "date", "bill", "amount", "qty", "rate", "tax", "gst", "upi"]:
+        if kw in lower:
+            score += 40
+    import re
+    decimals = len(re.findall(r"\b\d+\.\d{2}\b", text))
+    score += decimals * 25
+    return score
+
+
 class OCRAdapter(BaseIntegrationAdapter):
     """Wraps Windows Native Media OCR and Tesseract locally."""
 
@@ -52,7 +66,40 @@ class OCRAdapter(BaseIntegrationAdapter):
                 # Run in worker thread to prevent conflict with running asyncio event loops in FastAPI
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                     res = executor.submit(winocr.recognize_pil_sync, target_img).result(timeout=15)
-                text = (res.get("text") or "").strip()
+
+                words = []
+                for line in res.get("lines", []):
+                    for w in line.get("words", []):
+                        if w.get("text") and w.get("bounding_rect"):
+                            words.append(w)
+
+                if words:
+                    words.sort(key=lambda w: (w["bounding_rect"]["y"], w["bounding_rect"]["x"]))
+                    clustered_lines = []
+                    for w in words:
+                        wy = w["bounding_rect"]["y"]
+                        wh = w["bounding_rect"]["height"]
+                        placed = False
+                        for cl in clustered_lines:
+                            if abs(wy - cl["y"]) < max(wh, cl["h"]) * 0.5:
+                                cl["words"].append(w)
+                                cl["y"] = (cl["y"] * (len(cl["words"]) - 1) + wy) / len(cl["words"])
+                                placed = True
+                                break
+                        if not placed:
+                            clustered_lines.append({"y": wy, "h": wh, "words": [w]})
+
+                    clustered_lines.sort(key=lambda cl: cl["y"])
+                    lines_text = []
+                    for cl in clustered_lines:
+                        cl["words"].sort(key=lambda w: w["bounding_rect"]["x"])
+                        lines_text.append(" ".join(w["text"] for w in cl["words"]))
+                    text = "\n".join(lines_text).strip()
+                elif "lines" in res and res["lines"]:
+                    text = "\n".join(l["text"] for l in res["lines"] if l.get("text")).strip()
+                else:
+                    text = (res.get("text") or "").strip()
+
                 if text:
                     logger.info(f"[OCR] WinOCR extracted {len(text)} chars")
                     return text
@@ -75,7 +122,7 @@ class OCRAdapter(BaseIntegrationAdapter):
     def extract_text(self, image_path: Optional[str]) -> str:
         """Extract text from an image path with automatic preprocessing."""
         if not image_path:
-            return "[mock OCR output — no image supplied] Sample receipt: Total INR 450.00"
+            return ""
 
         if not os.path.isfile(image_path):
             logger.error(f"[OCR] File does not exist: {image_path}")
@@ -84,34 +131,41 @@ class OCRAdapter(BaseIntegrationAdapter):
         logger.info(f"[OCR] Processing file: {image_path}")
 
         try:
-            enhanced_img, thresh_img = preprocess_image_for_ocr(image_path)
+            candidates = []
 
-            # Try OCR on enhanced image first
-            text = self.extract_text_from_pil(enhanced_img)
-
-            # If enhanced image yielded very sparse text, try thresholded image
-            if len(text.strip()) < 15 and thresh_img is not None:
-                logger.info("[OCR] Low character count from enhanced image, trying thresholded image...")
-                thresh_text = self.extract_text_from_pil(thresh_img)
-                if len(thresh_text.strip()) > len(text.strip()):
-                    text = thresh_text
-
-            # If still sparse, try original image directly without preprocessing
-            if len(text.strip()) < 15:
-                logger.info("[OCR] Trying raw image directly without preprocessing...")
+            # 1. Raw image
+            try:
                 raw_img = Image.open(image_path)
                 raw_text = self.extract_text_from_pil(raw_img)
-                if len(raw_text.strip()) > len(text.strip()):
-                    text = raw_text
+                if raw_text:
+                    candidates.append((raw_text, _score_ocr_quality(raw_text)))
+            except Exception as err:
+                logger.debug(f"[OCR] Raw image extraction failed: {err}")
 
-            if text.strip():
-                return text.strip()
+            # 2. Preprocessed variants
+            try:
+                enhanced_img, thresh_img = preprocess_image_for_ocr(image_path)
+                if enhanced_img:
+                    enhanced_text = self.extract_text_from_pil(enhanced_img)
+                    if enhanced_text:
+                        candidates.append((enhanced_text, _score_ocr_quality(enhanced_text)))
+
+                if thresh_img:
+                    thresh_text = self.extract_text_from_pil(thresh_img)
+                    if thresh_text:
+                        candidates.append((thresh_text, _score_ocr_quality(thresh_text)))
+            except Exception as err:
+                logger.debug(f"[OCR] Preprocessed extraction failed: {err}")
+
+            if candidates:
+                best_text = max(candidates, key=lambda c: c[1])[0]
+                return best_text.strip()
 
             logger.warning(f"[OCR] No text recognized from image: {image_path}")
             return ""
         except Exception as exc:
             logger.error(f"[OCR] Error during extraction: {exc}", exc_info=True)
-            return f"[OCR error: {exc}]"
+            return ""
 
     def normalize_data(self, raw_data: dict) -> dict:
         return {"normalized_text": raw_data.get("raw_text", "").strip()}

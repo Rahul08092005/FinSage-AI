@@ -21,7 +21,8 @@ SKIP_WORDS = {
     "date", "time", "invoice", "receipt", "bill", "order", "phone", "tel",
     "thank", "thanks", "welcome", "payment", "due", "net", "amount", "summary",
     "merchant", "store", "pos", "credit", "debit", "visa", "mastercard", "upi",
-    "ref", "reference", "auth", "trans", "transaction", "account", "customer"
+    "ref", "reference", "auth", "trans", "transaction", "account", "customer",
+    "table", "cashier", "dine", "rate"
 }
 
 INVALID_ITEM_NAMES = {
@@ -38,6 +39,10 @@ def _is_skip_line(line: str) -> bool:
         return True
     if not any(c.isalpha() for c in clean):
         return True
+    if "%" in clean:
+        return True
+    if "subtotal" in clean or "sub total" in clean:
+        return True
 
     first_word = clean.split()[0].rstrip(":#.")
     if first_word in SKIP_WORDS:
@@ -45,11 +50,17 @@ def _is_skip_line(line: str) -> bool:
 
     skip_phrases = [
         "amount due", "sub total", "grand total", "net amount",
-        "thank you", "payment mode", "credit card", "reference #"
+        "thank you", "payment mode", "credit card", "reference #",
+        "table no", "bill no", "dine in", "item qty", "good food",
+        "visit again", "upi id", "amount paid", "rate amount"
     ]
-    for phrase in skip_phrases:
-        if clean.startswith(phrase):
-            return True
+    if clean.startswith("total") or clean == "total" or clean.startswith("date") or clean.startswith("time"):
+        return True
+    month_regex = r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b"
+    if re.search(month_regex, clean, re.I) and any(c.isdigit() for c in clean):
+        return True
+    if re.search(r"\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b", clean):
+        return True
 
     return False
 
@@ -96,32 +107,32 @@ def parse_line_items(raw_text: str) -> list[dict]:
     patterns = [
         # Pattern 1: Item Qty x/@ UnitPrice Total (e.g. Cold Coffee 2 x 150.00 300.00)
         re.compile(
-            r'^(?P<item>[A-Za-z0-9\s\-\.\'\&\/]+?)\s+(?P<qty>\d+)\s*(?:x|@|\*)\s*(?P<uprice>\d+(?:\.\d+)?)\s+(?P<total>\d+(?:\.\d+)?)$',
+            r'^(?P<item>[A-Za-z0-9\s\-\.\'\&\/\(\)]+?)\s+(?P<qty>\d+)\s*(?:x|@|\*)\s*(?P<uprice>[\d,]+(?:\.\d+)?)\s+(?P<total>[\d,]+(?:\.\d+)?)$',
             re.IGNORECASE,
         ),
         # Pattern 2: Item Qty UnitPrice Total (e.g. COFFEE 1 120.00 120.00)
         re.compile(
-            r'^(?P<item>[A-Za-z0-9\s\-\.\'\&\/]+?)\s+(?P<qty>\d+)\s+(?P<uprice>\d+(?:\.\d+)?)\s+(?P<total>\d+(?:\.\d+)?)$',
+            r'^(?P<item>[A-Za-z0-9\s\-\.\'\&\/\(\)]+?)\s+(?P<qty>\d+)\s+(?P<uprice>[\d,]+(?:\.\d+)?)\s+(?P<total>[\d,]+(?:\.\d+)?)$',
             re.IGNORECASE,
         ),
         # Pattern 3: Item xQty / Qtyx Total (e.g. Sandwich x2 240, Sandwich 2x 240.00)
         re.compile(
-            r'^(?P<item>[A-Za-z0-9\s\-\.\'\&\/]+?)\s+(?:x\s*(?P<qty1>\d+)|(?P<qty2>\d+)\s*x)\s+(?P<total>\d+(?:\.\d+)?)$',
+            r'^(?P<item>[A-Za-z0-9\s\-\.\'\&\/\(\)]+?)\s+(?:x\s*(?P<qty1>\d+)|(?P<qty2>\d+)\s*x)\s+(?P<total>[\d,]+(?:\.\d+)?)$',
             re.IGNORECASE,
         ),
         # Pattern 4: Item Qty Total (e.g. COFFEE 1 120.00)
         re.compile(
-            r'^(?P<item>[A-Za-z0-9\s\-\.\'\&\/]+?)\s+(?P<qty>\d+)\s+(?P<total>\d+(?:\.\d+)?)$',
+            r'^(?P<item>[A-Za-z0-9\s\-\.\'\&\/\(\)]+?)\s+(?P<qty>\d+)\s+(?P<total>[\d,]+(?:\.\d+)?)$',
             re.IGNORECASE,
         ),
         # Pattern 5: Leading Qty (opt x) Item Total (e.g. 2 x Milk 60.00, 2x Milk 60)
         re.compile(
-            r'^(?P<qty>\d+)\s*(?:x\s+)?(?P<item>[A-Za-z0-9\s\-\.\'\&\/]+?)\s+(?P<total>\d+(?:\.\d+)?)$',
+            r'^(?P<qty>\d+)\s*(?:x\s+)?(?P<item>[A-Za-z0-9\s\-\.\'\&\/\(\)]+?)\s+(?P<total>[\d,]+(?:\.\d+)?)$',
             re.IGNORECASE,
         ),
         # Pattern 6: Item Total (default qty 1) (e.g. Capuccino 250.00)
         re.compile(
-            r'^(?P<item>[A-Za-z0-9\s\-\.\'\&\/]+?)\s+(?P<total>\d+(?:\.\d+)?)$',
+            r'^(?P<item>[A-Za-z0-9\s\-\.\'\&\/\(\)]+?)\s+(?P<total>[\d,]+(?:\.\d+)?)$',
             re.IGNORECASE,
         ),
     ]
@@ -143,7 +154,7 @@ def parse_line_items(raw_text: str) -> list[dict]:
                 continue
 
             try:
-                line_total = float(gd["total"])
+                line_total = float(gd["total"].replace(",", ""))
             except (ValueError, TypeError):
                 continue
 
@@ -161,7 +172,7 @@ def parse_line_items(raw_text: str) -> list[dict]:
             unit_price = None
             if "uprice" in gd and gd["uprice"] is not None:
                 try:
-                    unit_price = float(gd["uprice"])
+                    unit_price = float(gd["uprice"].replace(",", ""))
                 except ValueError:
                     unit_price = None
 
@@ -170,9 +181,12 @@ def parse_line_items(raw_text: str) -> list[dict]:
 
             items.append({
                 "item_name": item_name,
+                "name": item_name,
                 "quantity": qty,
+                "qty": qty,
                 "unit_price": unit_price,
                 "line_total": round(line_total, 2),
+                "total": round(line_total, 2),
             })
             break
 
@@ -272,6 +286,7 @@ def parse_receipt(image_path: str) -> dict:
         "payment_mode": extracted.get("payment_mode"),
         "payment_details": extracted.get("payment_details"),
         "confidence": extracted.get("confidence", 0.5),
+        "amount_verified": extracted.get("amount_verified", False),
         "raw_text": raw_text,
         "line_items": line_items,
     }

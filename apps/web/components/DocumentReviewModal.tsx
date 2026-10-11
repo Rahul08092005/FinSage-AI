@@ -27,7 +27,33 @@ interface DocumentReviewModalProps {
   onConfirmed: () => void;
 }
 
-const CATEGORIES = ["Food", "Transport", "Shopping", "Bills", "Entertainment", "Other"];
+const CATEGORIES = ["Food", "Transport", "Shopping", "Bills", "Entertainment", "Healthcare", "Other"];
+
+export function parseLocalDateString(raw: any): string {
+  if (!raw) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    return s.slice(0, 10);
+  }
+  const dt = new Date(s);
+  if (!isNaN(dt.getTime())) {
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, "0");
+    const d = String(dt.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 export function DocumentReviewModal({
   token,
@@ -58,9 +84,7 @@ export function DocumentReviewModal({
       return rows.map((r) => ({
         amount: r.amount != null && !isNaN(Number(r.amount)) && Number(r.amount) > 0 ? Number(r.amount) : "",
         category: r.category && CATEGORIES.includes(r.category) ? r.category : (CATEGORIES.includes("Other") ? "Other" : "Food"),
-        transactionDate: r.transactionDate || r.transaction_date || r.date
-          ? new Date(r.transactionDate || r.transaction_date || r.date).toISOString().slice(0, 10)
-          : new Date().toISOString().slice(0, 10),
+        transactionDate: parseLocalDateString(r.transactionDate || r.transaction_date || r.date),
         description: r.description ?? r.merchant ?? r.narration ?? r.vendor ?? r.title ?? "Extracted expense",
         accountId: r.accountId,
       }));
@@ -70,7 +94,7 @@ export function DocumentReviewModal({
       {
         amount: (document as any).amount != null && !isNaN(Number((document as any).amount)) && Number((document as any).amount) > 0 ? Number((document as any).amount) : "",
         category: (document as any).category && CATEGORIES.includes((document as any).category) ? (document as any).category : "Food",
-        transactionDate: (document as any).date || new Date().toISOString().slice(0, 10),
+        transactionDate: parseLocalDateString((document as any).date),
         description: (document as any).merchant || (document as any).description || document.title.replace(/\.[^/.]+$/, ""),
       },
     ];
@@ -97,7 +121,7 @@ export function DocumentReviewModal({
       {
         amount: "",
         category: "Food",
-        transactionDate: new Date().toISOString().slice(0, 10),
+        transactionDate: parseLocalDateString(null),
         description: "",
       },
     ]);
