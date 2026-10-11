@@ -11,13 +11,13 @@ async function main() {
     where: { email: "demo@finsage.ai" },
     update: {
       password: passwordHash,
-      monthlySalary: 100000,
+      monthlySalary: 0,
     },
     create: {
       name: "Demo User",
       email: "demo@finsage.ai",
       password: passwordHash,
-      monthlySalary: 100000,
+      monthlySalary: 0,
     },
   });
 
@@ -29,10 +29,10 @@ async function main() {
     console.log(`\nPopulating data for user: ${user.name} (${user.email})...`);
 
     // Ensure user has monthly salary
-    if (!user.monthlySalary) {
+    if (user.monthlySalary === null || user.monthlySalary === undefined) {
       await prisma.user.update({
         where: { id: user.id },
-        data: { monthlySalary: 95000 },
+        data: { monthlySalary: 0 },
       });
     }
 

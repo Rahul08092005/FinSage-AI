@@ -25,7 +25,7 @@ export function DominantBalanceHero({
   const [savingSalary, setSavingSalary] = useState(false);
   const [salaryError, setSalaryError] = useState<string | null>(null);
 
-  const moneyIn = salary ?? 100000;
+  const moneyIn = salary ?? 0;
   const moneyOut = spend ?? 0;
   const available = Math.max(0, moneyIn - moneyOut);
   const savingsRate = moneyIn > 0 ? Math.round(((moneyIn - moneyOut) / moneyIn) * 100) : 0;
@@ -33,7 +33,7 @@ export function DominantBalanceHero({
 
   async function handleSaveSalary() {
     const num = Number(salaryInput);
-    if (!salaryInput || isNaN(num) || num <= 0) return;
+    if (!salaryInput || isNaN(num) || num < 0) return;
     setSavingSalary(true);
     setSalaryError(null);
     try {
@@ -125,7 +125,7 @@ export function DominantBalanceHero({
             <div className="flex items-center gap-1.5">
               <button
                 onClick={handleSaveSalary}
-                disabled={savingSalary || !salaryInput || Number(salaryInput) <= 0}
+                disabled={savingSalary || !salaryInput || Number(salaryInput) < 0}
                 className="rounded bg-[#84cc16] px-2 py-0.5 text-[10px] font-bold text-[#18122B] hover:bg-[#74b810] disabled:opacity-40"
               >
                 {savingSalary ? "..." : "Save"}

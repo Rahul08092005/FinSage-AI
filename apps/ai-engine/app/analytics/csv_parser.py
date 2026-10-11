@@ -13,12 +13,18 @@ def parse_transactions_csv(csv_bytes: bytes) -> pd.DataFrame:
     For large datasets (> 5,000 rows), processes in chunks using pandas chunksize
     to minimize memory spikes, concatenating sanitized chunks at the end.
     """
+    if not csv_bytes or not csv_bytes.strip():
+        return pd.DataFrame(columns=EXPECTED_COLUMNS)
+
     estimated_rows = csv_bytes.count(b"\n")
 
     if estimated_rows > CHUNK_THRESHOLD:
         chunks: list[pd.DataFrame] = []
         first_chunk = True
         for chunk in pd.read_csv(io.BytesIO(csv_bytes), chunksize=CHUNK_SIZE):
+            chunk.columns = [str(c).strip().lower() for c in chunk.columns]
+            if "category" not in chunk.columns:
+                chunk["category"] = None
             if first_chunk:
                 missing = [c for c in EXPECTED_COLUMNS if c not in chunk.columns]
                 if missing:
@@ -36,6 +42,9 @@ def parse_transactions_csv(csv_bytes: bytes) -> pd.DataFrame:
 
     # Standard fast path for typical smaller CSVs (<= 5,000 rows)
     df = pd.read_csv(io.BytesIO(csv_bytes))
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    if "category" not in df.columns:
+        df["category"] = None
 
     missing = [c for c in EXPECTED_COLUMNS if c not in df.columns]
     if missing:

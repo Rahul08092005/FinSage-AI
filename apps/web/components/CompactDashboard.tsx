@@ -242,8 +242,8 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
       return;
     }
 
-    if (num <= 0) {
-      setSalaryError("Monthly income must be greater than ₹0.");
+    if (num < 0) {
+      setSalaryError("Monthly income cannot be negative.");
       return;
     }
 
@@ -565,13 +565,13 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
               type="button"
               onClick={handleOpenSalaryModal}
               className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold transition cursor-pointer ${
-                hasSalary
+                hasSalary || salary === 0
                   ? "bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 hover:border-teal-300"
                   : "bg-teal-600 border border-teal-700 text-white hover:bg-teal-700 shadow-3xs"
               }`}
-              title={hasSalary ? "Edit monthly income" : "Add monthly income"}
+              title={hasSalary || salary === 0 ? "Edit monthly income" : "Add monthly income"}
             >
-              <span>{hasSalary ? "✏️ Edit" : "+ Add Income"}</span>
+              <span>{hasSalary || salary === 0 ? "✏️ Edit" : "+ Add Income"}</span>
             </button>
           </div>
 
@@ -608,16 +608,16 @@ export function CompactDashboard({ token }: CompactDashboardProps) {
 
           <div className="flex items-center justify-between pt-1">
             <span className="text-[10px] text-[#18122B]/50 font-medium">
-              {hasSalary ? "Verified Baseline" : "Profile Status"}
+              {hasSalary || salary === 0 ? "Verified Baseline" : "Profile Status"}
             </span>
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-bold border ${
-                hasSalary
+                hasSalary || salary === 0
                   ? "bg-emerald-50 border-emerald-200 text-emerald-700"
                   : "bg-amber-50 border-amber-200 text-amber-700"
               }`}
             >
-              {hasSalary ? "Active Flow" : "Not Configured"}
+              {hasSalary || salary === 0 ? "Active Flow" : "Not Configured"}
             </span>
           </div>
         </div>

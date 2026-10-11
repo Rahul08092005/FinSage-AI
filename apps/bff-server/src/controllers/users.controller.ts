@@ -9,7 +9,7 @@ import { AuthedRequest } from "../middleware/auth.middleware";
 const AI_ENGINE_BASE = process.env.AI_ENGINE_URL || "http://localhost:8000";
 
 const salarySchema = z.object({
-  monthlySalary: z.number().positive(),
+  monthlySalary: z.number().nonnegative(),
 });
 
 const taxProfileSchema = z

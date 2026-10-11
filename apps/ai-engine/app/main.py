@@ -5,7 +5,7 @@ import os
 from typing import Any
 import pandas as pd
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -142,9 +142,25 @@ def rag_ingest(req: RAGIngestRequest):
 
 
 @app.post("/internal/analytics/demo-spending")
-async def demo_spending(csv_text: str):
+async def demo_spending(request: Request):
     """Phase 1 proof that CSV -> pandas -> metrics works."""
-    df = parse_transactions_csv(csv_text.encode("utf-8"))
+    body_bytes = await request.body()
+    if not body_bytes:
+        csv_param = request.query_params.get("csv_text", "")
+        body_bytes = csv_param.encode("utf-8")
+    else:
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            try:
+                data = json.loads(body_bytes.decode("utf-8"))
+                if isinstance(data, dict):
+                    csv_text = data.get("csv_text") or data.get("csv") or data.get("body") or ""
+                    body_bytes = csv_text.encode("utf-8")
+                elif isinstance(data, str):
+                    body_bytes = data.encode("utf-8")
+            except Exception:
+                pass
+    df = parse_transactions_csv(body_bytes)
     return calculate_monthly_spending(df)
 
 
@@ -203,11 +219,27 @@ async def splitwise_group(group_id: str):
 
 
 @app.post("/internal/analytics/parse-csv-transactions")
-async def parse_csv_transactions(csv_text: str):
+async def parse_csv_transactions(request: Request):
     """Person 3's Step 8 endpoint — parses raw CSV text and returns individual
     normalised rows (not an aggregate summary).  Aditi's worker creates one
     Transaction per row from this response."""
-    df = parse_transactions_csv(csv_text.encode("utf-8"))
+    body_bytes = await request.body()
+    if not body_bytes:
+        csv_param = request.query_params.get("csv_text", "")
+        body_bytes = csv_param.encode("utf-8")
+    else:
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            try:
+                data = json.loads(body_bytes.decode("utf-8"))
+                if isinstance(data, dict):
+                    csv_text = data.get("csv_text") or data.get("csv") or data.get("body") or ""
+                    body_bytes = csv_text.encode("utf-8")
+                elif isinstance(data, str):
+                    body_bytes = data.encode("utf-8")
+            except Exception:
+                pass
+    df = parse_transactions_csv(body_bytes)
     raw_rows = df.to_dict(orient="records")
     return normalize_batch(raw_rows, source="csv")
 
