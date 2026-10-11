@@ -32,6 +32,14 @@ app.use(cors());
 app.use(helmet());
 app.use(express.json());
 
+app.get("/", (_req, res) => {
+  res.json({
+    service: "FinSage BFF API",
+    status: "ok",
+    healthCheck: "/api/v1/health",
+  });
+});
+
 // Phase 1 / 2
 app.use("/api/v1/health", healthRoutes);
 app.use("/api/v1/auth", authRoutes);

@@ -5,10 +5,20 @@ import Redis from "ioredis";
 import dotenv from "dotenv";
 import path from "path";
 
+import { sanitizeRedisUrl } from "../lib/redis";
+
 dotenv.config({ path: path.join(__dirname, "../../.env") });
 
 const prisma = new PrismaClient();
-const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+const REDIS_URL = sanitizeRedisUrl(process.env.REDIS_URL);
+const redis = new Redis(REDIS_URL, {
+  lazyConnect: true,
+  maxRetriesPerRequest: 1,
+  retryStrategy(times) {
+    if (times > 3) return null;
+    return Math.min(times * 1000, 3000);
+  },
+});
 
 const QUEUE_KEY = "document-processing-queue";
 const AI_ENGINE_BASE = process.env.AI_ENGINE_URL || "http://localhost:8000";
