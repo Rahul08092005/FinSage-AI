@@ -118,7 +118,7 @@ def main():
     pipeline_res = process_document(FIXTURE_PATH, "receipt")
     print(json.dumps(pipeline_res, indent=2, default=str))
 
-    # 6. Worker decision simulation
+    # 6. Worker decision simulation.
     print("\n--- 6. document.worker.ts Decision Simulation ---")
     confidence = pipeline_res.get("confidence", 0.0)
     txs = pipeline_res.get("transactions", [])
