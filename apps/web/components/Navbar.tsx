@@ -136,7 +136,7 @@ export function Navbar() {
               </>
             ) : (
               <>
-                <a href="#problem" className="font-medium text-[#18122B]/75 transition hover:text-[#18122B]">The Problem</a>
+                <a href="#features" className="font-medium text-[#18122B]/75 transition hover:text-[#18122B]">Features</a>
                 <a href="#how-it-works" className="font-medium text-[#18122B]/75 transition hover:text-[#18122B]">How It Works</a>
                 <a href="#ocr" className="font-medium text-[#18122B]/75 transition hover:text-[#18122B]">OCR Capture</a>
                 <a href="#advisor" className="font-medium text-[#18122B]/75 transition hover:text-[#18122B]">AI Advisor</a>
@@ -282,7 +282,7 @@ export function Navbar() {
               </>
             ) : (
               <>
-                <a href="#problem" onClick={() => setMobileMenuOpen(false)} className="py-1 hover:text-[#18122B]">The Problem</a>
+                <a href="#features" onClick={() => setMobileMenuOpen(false)} className="py-1 hover:text-[#18122B]">Features</a>
                 <a href="#how-it-works" onClick={() => setMobileMenuOpen(false)} className="py-1 hover:text-[#18122B]">How It Works</a>
                 <a href="#ocr" onClick={() => setMobileMenuOpen(false)} className="py-1 hover:text-[#18122B]">OCR Capture</a>
                 <a href="#advisor" onClick={() => setMobileMenuOpen(false)} className="py-1 hover:text-[#18122B]">AI Advisor</a>

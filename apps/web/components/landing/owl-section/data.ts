@@ -1,5 +1,19 @@
 import { OWL_ASSETS } from "@/lib/owlAssets";
 
+export const OWL_FRONT_ASSETS = {
+  base: "/owl/owl-front-blank.png",
+  iris: "/owl/iris-front.png",
+  original: "/owl/owl-front.png",
+  naturalDimensions: {
+    width: 1156,
+    height: 1361,
+  },
+  irisNaturalDimensions: {
+    width: 256,
+    height: 256,
+  },
+} as const;
+
 export interface OwlFeatureCardData {
   readonly id: string;
   readonly title: string;
@@ -9,7 +23,11 @@ export interface OwlFeatureCardData {
   readonly borderColor: string;
   readonly buttonBg: string;
   readonly glowColor: string;
-  readonly linkTarget?: string;
+  readonly accentColor: string;
+  readonly description: string;
+  readonly bullets: readonly [string, string, string];
+  readonly ctaText: string;
+  readonly ctaHref: string;
   readonly position: {
     readonly left: string;
     readonly top: string;
@@ -28,12 +46,20 @@ export const OWL_FEATURE_CARDS: readonly OwlFeatureCardData[] = [
     borderColor: "border-[#FDBA74]/50 hover:border-[#FB923C]/80",
     buttonBg: "bg-[#F97316] hover:bg-[#EA580C]",
     glowColor: "bg-[#FB923C]/25",
-    linkTarget: "#ocr",
+    accentColor: "#F97316",
+    description: "Turn paper receipts, payment screenshots and bank statements into clean, structured records in seconds. Powered by intelligent OCR with confidence scoring, you stay in total control of every entry before it hits your ledger.",
+    bullets: [
+      "Drop a receipt, payment screenshot or bank statement (PDF, PNG, JPG or CSV)",
+      "OCR reads amounts, dates and merchants and scores its own confidence",
+      "Review anything uncertain, then confirm it into your ledger",
+    ],
+    ctaText: "Upload a document",
+    ctaHref: "/documents",
     position: {
-      left: "5.9%",
-      top: "24.8%",
-      width: "22.9%",
-      height: "18.2%",
+      left: "98px",
+      top: "233px",
+      width: "383px",
+      height: "171px",
     },
   },
   {
@@ -45,12 +71,20 @@ export const OWL_FEATURE_CARDS: readonly OwlFeatureCardData[] = [
     borderColor: "border-[#D8B4FE]/50 hover:border-[#C084FC]/80",
     buttonBg: "bg-[#9333EA] hover:bg-[#7E22CE]",
     glowColor: "bg-[#A855F7]/25",
-    linkTarget: "#showcase",
+    accentColor: "#9333EA",
+    description: "Gain instant clarity over your cash flow with automatic categorization and real-time breakdowns. Filter transactions by date, category or account to see exactly where every rupee goes without tedious manual spreadsheets.",
+    bullets: [
+      "Add transactions or bulk-import a CSV",
+      "Automatic categorization, filterable by category and date",
+      "Category breakdown and monthly spending at a glance",
+    ],
+    ctaText: "Open transactions",
+    ctaHref: "/transactions",
     position: {
-      left: "28.8%",
-      top: "11%",
-      width: "20.9%",
-      height: "18.7%",
+      left: "482px",
+      top: "104px",
+      width: "350px",
+      height: "176px",
     },
   },
   {
@@ -62,12 +96,20 @@ export const OWL_FEATURE_CARDS: readonly OwlFeatureCardData[] = [
     borderColor: "border-[#86EFAC]/50 hover:border-[#4ADE80]/80",
     buttonBg: "bg-[#10B981] hover:bg-[#059669]",
     glowColor: "bg-[#34D399]/25",
-    linkTarget: "#showcase",
+    accentColor: "#10B981",
+    description: "Define personalized savings targets for emergencies, vacations or big life purchases with dedicated milestones. Watch live projected completion dates adjust automatically as your real-world savings grow.",
+    bullets: [
+      "Create savings goals with a target amount and date",
+      "See a projected completion date based on your real net savings",
+      "Track progress as your money moves",
+    ],
+    ctaText: "Set a goal",
+    ctaHref: "/goals",
     position: {
-      left: "54%",
-      top: "11.3%",
-      width: "20.9%",
-      height: "19%",
+      left: "903px",
+      top: "106px",
+      width: "350px",
+      height: "179px",
     },
   },
   {
@@ -79,12 +121,20 @@ export const OWL_FEATURE_CARDS: readonly OwlFeatureCardData[] = [
     borderColor: "border-[#FDE047]/50 hover:border-[#FACC15]/80",
     buttonBg: "bg-[#F59E0B] hover:bg-[#D97706]",
     glowColor: "bg-[#FBBF24]/25",
-    linkTarget: "#splitwise",
+    accentColor: "#F59E0B",
+    description: "Eliminate awkward money talks by sharing bills, rent and household groceries with flatmates or family in one shared hub. Keep running balances transparent so everyone knows who owes whom with single-tap settlements.",
+    bullets: [
+      "See shared group expenses and who owes whom",
+      "Split rent, groceries and bills with flatmates or family",
+      "Keep unsettled balances visible next to your own spending",
+    ],
+    ctaText: "Open transactions",
+    ctaHref: "/transactions",
     position: {
-      left: "73.3%",
-      top: "32.2%",
-      width: "21.7%",
-      height: "19.6%",
+      left: "1226px",
+      top: "303px",
+      width: "363px",
+      height: "184px",
     },
   },
   {
@@ -96,12 +146,20 @@ export const OWL_FEATURE_CARDS: readonly OwlFeatureCardData[] = [
     borderColor: "border-[#93C5FD]/50 hover:border-[#60A5FA]/80",
     buttonBg: "bg-[#0284C7] hover:bg-[#0369A1]",
     glowColor: "bg-[#38BDF8]/25",
-    linkTarget: "#showcase",
+    accentColor: "#0284C7",
+    description: "Take the guesswork out of monthly budgeting with dynamic category limits and live variance gauges. Leverage moving-average forecasts and tailored recommendations drawn directly from your genuine spending history.",
+    bullets: [
+      "Monthly limits per category with live variance gauges",
+      "Moving-average expense forecasts",
+      "Budget suggestions based on your spending history",
+    ],
+    ctaText: "Open budgets",
+    ctaHref: "/budgets",
     position: {
-      left: "4.3%",
-      top: "47.1%",
-      width: "23.4%",
-      height: "18.5%",
+      left: "72px",
+      top: "443px",
+      width: "392px",
+      height: "174px",
     },
   },
   {
@@ -113,12 +171,20 @@ export const OWL_FEATURE_CARDS: readonly OwlFeatureCardData[] = [
     borderColor: "border-[#F472B6]/50 hover:border-[#EC4899]/80",
     buttonBg: "bg-[#EC4899] hover:bg-[#DB2777]",
     glowColor: "bg-[#F472B6]/25",
-    linkTarget: "#advisor",
+    accentColor: "#EC4899",
+    description: "Receive unbiased financial insights tailored to your specific balances, spending habits and future aspirations. Explore Safe, Growth and Balanced perspectives side by side with citations directly sourced from your ledger.",
+    bullets: [
+      "Ask anything about your money and watch answers stream in live",
+      "Answers show their sources so you can check them",
+      "Compare Safe, Growth and Balanced perspectives side by side",
+    ],
+    ctaText: "Ask the Advisor",
+    ctaHref: "/advisor",
     position: {
-      left: "73.4%",
-      top: "59.3%",
-      width: "21.7%",
-      height: "19.9%",
+      left: "1227px",
+      top: "558px",
+      width: "362px",
+      height: "187px",
     },
   },
   {
@@ -130,12 +196,20 @@ export const OWL_FEATURE_CARDS: readonly OwlFeatureCardData[] = [
     borderColor: "border-[#BEF264]/50 hover:border-[#A3E635]/80",
     buttonBg: "bg-[#84CC16] hover:bg-[#65A30D]",
     glowColor: "bg-[#A3E635]/25",
-    linkTarget: "#showcase",
+    accentColor: "#84CC16",
+    description: "Uncover hidden patterns in your lifestyle with proactive anomaly alerts and an overarching financial health score. Generate executive summary reports ready for export whenever you need a comprehensive big-picture review.",
+    bullets: [
+      "A financial health score for your overall picture",
+      "Spending anomaly detection that flags unusual charges",
+      "Export an executive report as a Markdown file",
+    ],
+    ctaText: "Open dashboard",
+    ctaHref: "/dashboard",
     position: {
-      left: "7.8%",
-      top: "70%",
-      width: "24%",
-      height: "18%",
+      left: "130px",
+      top: "659px",
+      width: "401px",
+      height: "170px",
     },
   },
 ] as const;
@@ -147,6 +221,7 @@ export interface FloatingDecorItem {
   readonly height: number;
   readonly animType: "slow" | "medium" | "fast";
   readonly animDelay: string;
+  readonly depth: number;
   readonly style: {
     readonly left: string;
     readonly top: string;
@@ -165,10 +240,11 @@ export const FLOATING_DECOR: readonly FloatingDecorItem[] = [
     height: 368,
     animType: "slow",
     animDelay: "0.2s",
+    depth: 0.8,
     style: {
-      left: "34.0%",
-      top: "37.5%",
-      width: "5.4%",
+      left: "560px",
+      top: "350px",
+      width: "90px",
       transform: "rotate(-6deg)",
       zIndex: 15,
     },
@@ -180,10 +256,11 @@ export const FLOATING_DECOR: readonly FloatingDecorItem[] = [
     height: 367,
     animType: "medium",
     animDelay: "0.8s",
+    depth: 0.7,
     style: {
-      left: "61.5%",
-      top: "39.5%",
-      width: "5.2%",
+      left: "1030px",
+      top: "365px",
+      width: "90px",
       transform: "rotate(8deg)",
       zIndex: 15,
     },
@@ -195,10 +272,11 @@ export const FLOATING_DECOR: readonly FloatingDecorItem[] = [
     height: 341,
     animType: "fast",
     animDelay: "0.4s",
+    depth: 1.2,
     style: {
-      left: "38.0%",
-      top: "49.5%",
-      width: "3.8%",
+      left: "630px",
+      top: "465px",
+      width: "64px",
       transform: "rotate(14deg)",
       zIndex: 15,
     },
@@ -210,10 +288,11 @@ export const FLOATING_DECOR: readonly FloatingDecorItem[] = [
     height: 387,
     animType: "slow",
     animDelay: "1.1s",
+    depth: 0.9,
     style: {
-      left: "34.5%",
-      top: "56.0%",
-      width: "6.8%",
+      left: "575px",
+      top: "530px",
+      width: "115px",
       transform: "rotate(-12deg)",
       zIndex: 15,
     },
@@ -225,10 +304,11 @@ export const FLOATING_DECOR: readonly FloatingDecorItem[] = [
     height: 381,
     animType: "fast",
     animDelay: "0.6s",
+    depth: 1.3,
     style: {
-      left: "66.0%",
-      top: "52.5%",
-      width: "3.2%",
+      left: "1100px",
+      top: "490px",
+      width: "55px",
       transform: "rotate(18deg)",
       zIndex: 15,
     },
@@ -240,10 +320,11 @@ export const FLOATING_DECOR: readonly FloatingDecorItem[] = [
     height: 341,
     animType: "medium",
     animDelay: "1.4s",
+    depth: 1.1,
     style: {
-      left: "63.0%",
-      top: "65.0%",
-      width: "4.2%",
+      left: "1050px",
+      top: "610px",
+      width: "70px",
       transform: "rotate(-10deg)",
       zIndex: 15,
     },
@@ -255,10 +336,11 @@ export const FLOATING_DECOR: readonly FloatingDecorItem[] = [
     height: 375,
     animType: "slow",
     animDelay: "0.9s",
+    depth: 0.6,
     style: {
-      left: "33.8%",
-      top: "70.5%",
-      width: "3.4%",
+      left: "565px",
+      top: "660px",
+      width: "60px",
       transform: "rotate(12deg)",
       zIndex: 15,
     },
@@ -270,10 +352,11 @@ export const FLOATING_DECOR: readonly FloatingDecorItem[] = [
     height: 354,
     animType: "fast",
     animDelay: "1.6s",
+    depth: 1.0,
     style: {
-      left: "39.0%",
-      top: "70.0%",
-      width: "3.8%",
+      left: "650px",
+      top: "660px",
+      width: "65px",
       transform: "rotate(-6deg)",
       zIndex: 15,
     },
@@ -285,10 +368,11 @@ export const FLOATING_DECOR: readonly FloatingDecorItem[] = [
     height: 377,
     animType: "medium",
     animDelay: "0.3s",
+    depth: 0.5,
     style: {
-      left: "60.0%",
-      top: "35.5%",
-      width: "2.0%",
+      left: "1005px",
+      top: "330px",
+      width: "32px",
       transform: "rotate(4deg)",
       zIndex: 15,
     },
@@ -300,10 +384,11 @@ export const FLOATING_DECOR: readonly FloatingDecorItem[] = [
     height: 377,
     animType: "slow",
     animDelay: "1.2s",
+    depth: 0.4,
     style: {
-      left: "61.6%",
-      top: "52.0%",
-      width: "1.8%",
+      left: "1030px",
+      top: "490px",
+      width: "28px",
       transform: "rotate(-8deg)",
       zIndex: 15,
     },
@@ -315,10 +400,11 @@ export const FLOATING_DECOR: readonly FloatingDecorItem[] = [
     height: 377,
     animType: "fast",
     animDelay: "0.7s",
+    depth: 0.5,
     style: {
-      left: "27.8%",
-      top: "13.0%",
-      width: "1.9%",
+      left: "465px",
+      top: "115px",
+      width: "32px",
       transform: "rotate(6deg)",
       zIndex: 15,
     },
