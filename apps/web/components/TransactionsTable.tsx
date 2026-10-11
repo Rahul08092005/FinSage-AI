@@ -20,6 +20,7 @@ import {
   type InsightItem,
 } from "@/lib/api";
 import { formatINR } from "@/lib/formatCurrency";
+import { suggestCategory, suggestCategoryFromSms } from "@/lib/categorize";
 import { DocumentReviewModal, type ReviewDocument } from "@/components/DocumentReviewModal";
 
 export interface TransactionItem {
@@ -296,7 +297,10 @@ function extractDraft(data: any): EditableSmsDraft | null {
       : "debit",
     description: (candidate.description || candidate.merchant || "").trim(),
     date: normalizeDateForInput(candidate.date || candidate.transactionDate || candidate.transaction_date),
-    category: candidate.category || "Food & Dining",
+    category:
+      candidate.category && candidate.category !== "General"
+        ? candidate.category
+        : suggestCategoryFromSms(candidate.description || candidate.merchant),
     account: candidate.account || candidate.accountId || candidate.source || candidate.bank || "",
     hasAmount,
     hasType: candidate.type != null && candidate.type !== "",
@@ -332,23 +336,7 @@ function parseSmsClientFallback(text: string): EditableSmsDraft | null {
   const accMatch = text.match(/(?:A\/?c|account|card)\s*[\w*X-]+/i);
   const account = accMatch ? accMatch[0].trim() : "";
 
-  let category = "General";
-  const d = desc.toLowerCase();
-  if (["mart", "grocery", "groceries", "supermarket", "fresh", "blinkit", "zepto"].some((k) => d.includes(k))) {
-    category = "Groceries";
-  } else if (["zomato", "swiggy", "cafe", "restaurant", "dining", "food", "coffee"].some((k) => d.includes(k))) {
-    category = "Food & Dining";
-  } else if (["uber", "ola", "metro", "petrol", "fuel", "travel"].some((k) => d.includes(k))) {
-    category = "Travel";
-  } else if (["amazon", "flipkart", "myntra", "shopping", "zara"].some((k) => d.includes(k))) {
-    category = "Shopping";
-  } else if (["apollo", "pharmacy", "health", "hospital"].some((k) => d.includes(k))) {
-    category = "Healthcare";
-  } else if (["netflix", "hotstar", "spotify", "cinema"].some((k) => d.includes(k))) {
-    category = "Entertainment";
-  } else if (["electricity", "bescom", "water", "wifi", "bill"].some((k) => d.includes(k))) {
-    category = "Utilities";
-  }
+  const category = suggestCategoryFromSms(desc, text);
 
   return {
     amount,
@@ -466,6 +454,7 @@ export function TransactionsTable({
     description: "",
     date: new Date().toISOString().slice(0, 10),
   });
+  const [categoryManuallySet, setCategoryManuallySet] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Search & Filters
@@ -647,6 +636,7 @@ export function TransactionsTable({
         description: "",
         date: new Date().toISOString().slice(0, 10),
       });
+      setCategoryManuallySet(false);
       showToast("Transaction recorded successfully! ✦");
       loadTransactions();
     } catch (err: any) {
@@ -728,11 +718,19 @@ export function TransactionsTable({
         setSmsDraft(null);
         return;
       }
+
+      if (!draft.category || draft.category === "General") {
+        draft.category = suggestCategoryFromSms(draft.description, trimmed);
+      }
+
       setSmsDraft(draft);
     } catch (err: any) {
       console.error("SMS parse error:", err);
       const fallbackDraft = parseSmsClientFallback(trimmed);
       if (fallbackDraft) {
+        if (!fallbackDraft.category || fallbackDraft.category === "General") {
+          fallbackDraft.category = suggestCategoryFromSms(fallbackDraft.description, trimmed);
+        }
         setSmsDraft(fallbackDraft);
         setSmsError(null);
       } else {
@@ -1552,7 +1550,19 @@ export function TransactionsTable({
                 placeholder="What did you spend on? (e.g. Dinner, Fuel, Rent)"
                 required
                 value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                onChange={(e) => {
+                  const newDesc = e.target.value;
+                  if (!categoryManuallySet) {
+                    const suggested = suggestCategory(newDesc);
+                    setForm({
+                      ...form,
+                      description: newDesc,
+                      ...(suggested ? { category: suggested } : {}),
+                    });
+                  } else {
+                    setForm({ ...form, description: newDesc });
+                  }
+                }}
                 className="w-full rounded-xl border border-[#DDD9CF] bg-white px-3 py-1.5 text-xs font-medium text-[#18122B] placeholder:text-[#18122B]/40 focus:border-[#18122B] focus:outline-none"
               />
             </div>
@@ -1561,7 +1571,10 @@ export function TransactionsTable({
             <div className="sm:col-span-3">
               <select
                 value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
+                onChange={(e) => {
+                  setCategoryManuallySet(true);
+                  setForm({ ...form, category: e.target.value });
+                }}
                 className="w-full rounded-xl border border-[#DDD9CF] bg-white px-2.5 py-1.5 text-xs font-medium text-[#18122B] focus:border-[#18122B] focus:outline-none cursor-pointer"
               >
                 <option value="Food & Dining">🍽️ Food & Dining</option>
@@ -1673,6 +1686,8 @@ export function TransactionsTable({
                       <option value="Rent">Rent</option>
                       <option value="Utilities">Utilities</option>
                       <option value="Travel">Travel</option>
+                      <option value="Healthcare">Healthcare</option>
+                      <option value="Subscriptions">Subscriptions</option>
                       <option value="General">General</option>
                     </select>
                   </div>
