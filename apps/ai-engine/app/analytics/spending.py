@@ -164,7 +164,8 @@ def calculate_health_score(
       For each category that is over its budget limit:
           subtract min(20, 20 * (overage_ratio))
           where overage_ratio = (actual - limit) / limit, capped at 1.0.
-      If total_income > 0 and total spend > total_income:
+          Budget adherence applies to the latest calendar month present in the data.
+      If total_income > 0 and total spend of the latest calendar month > total_income:
           subtract 15 points.
       For each goal with 'progress' > 0 (any positive progress):
           add 5 points (capped so score cannot exceed 100).
@@ -192,6 +193,42 @@ def calculate_health_score(
     score = 100
     breakdown: dict[str, float] = {}
 
+    # Ensure amount is numeric if present
+    if not transactions.empty and "amount" in transactions.columns:
+        if not pd.api.types.is_numeric_dtype(transactions["amount"]):
+            transactions = transactions.copy()
+            transactions["amount"] = pd.to_numeric(transactions["amount"], errors="coerce").fillna(0.0)
+
+    # Determine scoring transactions (latest calendar month if dates present)
+    scoring_transactions = transactions
+    date_col = None
+    parsed_dates = None
+    if not transactions.empty:
+        if "date" in transactions.columns:
+            date_col = "date"
+        elif "transactionDate" in transactions.columns:
+            date_col = "transactionDate"
+
+        if date_col is not None:
+            raw_dates = transactions[date_col]
+            try:
+                dt_series = pd.to_datetime(raw_dates, errors="coerce", utc=True, format="ISO8601")
+            except Exception:
+                dt_series = pd.to_datetime(raw_dates, errors="coerce", utc=True)
+            if dt_series.isna().any() and not raw_dates.isna().all():
+                dt_fallback = pd.to_datetime(raw_dates, errors="coerce", utc=True)
+                dt_series = dt_series.fillna(dt_fallback)
+            if hasattr(dt_series.dt, "tz") and dt_series.dt.tz is not None:
+                dt_series = dt_series.dt.tz_localize(None)
+
+            valid_dates = dt_series.dropna()
+            if not valid_dates.empty:
+                parsed_dates = dt_series
+                months = valid_dates.dt.to_period("M")
+                latest_month = months.max()
+                is_latest_month = (dt_series.dt.to_period("M") == latest_month)
+                scoring_transactions = transactions[is_latest_month]
+
     # Normalize budgets if passed as a list of budget dicts
     budgets_dict = {}
     if isinstance(budgets, dict):
@@ -201,9 +238,9 @@ def calculate_health_score(
             if isinstance(b, dict) and "category" in b:
                 budgets_dict[b["category"]] = float(b.get("monthlyLimit", b.get("limit", b.get("amount", 0))))
 
-    # Category budget checks
-    if not transactions.empty and "category" in transactions.columns and budgets_dict:
-        actual_by_cat = transactions.groupby("category")["amount"].sum().to_dict()
+    # Category budget checks (evaluated on the latest calendar month if dates present)
+    if not scoring_transactions.empty and "category" in scoring_transactions.columns and budgets_dict:
+        actual_by_cat = scoring_transactions.groupby("category")["amount"].sum().to_dict()
         for cat, limit in budgets_dict.items():
             actual = actual_by_cat.get(cat, 0.0)
             if limit > 0 and actual > limit:
@@ -212,9 +249,9 @@ def calculate_health_score(
                 score -= deduction
                 breakdown[f"{cat} over budget"] = -deduction
 
-    # Income vs spend check
-    if total_income > 0 and not transactions.empty and "amount" in transactions.columns:
-        total_spend = float(transactions["amount"].sum())
+    # Income vs spend check (evaluated on the latest calendar month if dates present)
+    if total_income > 0 and not scoring_transactions.empty and "amount" in scoring_transactions.columns:
+        total_spend = float(scoring_transactions["amount"].sum())
         if total_spend > total_income:
             score -= 15
             breakdown["Total spend exceeds income"] = -15
@@ -234,33 +271,25 @@ def calculate_health_score(
     # -----------------------------------------------------------------------
 
     # Spending trend direction (requires date + amount + ≥2 months)
-    if (
-        not transactions.empty
-        and "amount" in transactions.columns
-    ):
+    if not transactions.empty and "amount" in transactions.columns and parsed_dates is not None:
         df_trend = transactions.copy()
-        # Resolve date column
-        if "transactionDate" in df_trend.columns and "date" not in df_trend.columns:
-            df_trend["date"] = df_trend["transactionDate"]
-        if "date" in df_trend.columns:
-            if not pd.api.types.is_datetime64_any_dtype(df_trend["date"]):
-                df_trend["date"] = pd.to_datetime(df_trend["date"], errors="coerce")
-            df_trend = df_trend.dropna(subset=["date"])
-            if not df_trend.empty:
-                df_trend["_month"] = df_trend["date"].dt.to_period("M")
-                monthly_totals = df_trend.groupby("_month")["amount"].sum().sort_index()
-                if len(monthly_totals) >= 2:
-                    latest_month_spend = float(monthly_totals.iloc[-1])
-                    prior_mean = float(monthly_totals.iloc[:-1].mean())
-                    if latest_month_spend < prior_mean:
-                        score = min(100, score + 5)
-                        breakdown["Spending trend improving"] = +5
-                    elif latest_month_spend > prior_mean:
-                        score -= 5
-                        breakdown["Spending trend rising"] = -5
-                    # If equal, no change — trend is flat
+        df_trend["date"] = parsed_dates
+        df_trend = df_trend.dropna(subset=["date"])
+        if not df_trend.empty:
+            df_trend["_month"] = df_trend["date"].dt.to_period("M")
+            monthly_totals = df_trend.groupby("_month")["amount"].sum().sort_index()
+            if len(monthly_totals) >= 2:
+                latest_month_spend = float(monthly_totals.iloc[-1])
+                prior_mean = float(monthly_totals.iloc[:-1].mean())
+                if latest_month_spend < prior_mean:
+                    score = min(100, score + 5)
+                    breakdown["Spending trend improving"] = +5
+                elif latest_month_spend > prior_mean:
+                    score -= 5
+                    breakdown["Spending trend rising"] = -5
+                # If equal, no change — trend is flat
 
-    # Anomaly count penalty (reuses detect_anomalies)
+    # Anomaly count penalty (reuses detect_anomalies across full transactions window)
     if not transactions.empty and "amount" in transactions.columns and "category" in transactions.columns:
         anomaly_list = detect_anomalies(transactions)
         n_anomalies = len(anomaly_list)

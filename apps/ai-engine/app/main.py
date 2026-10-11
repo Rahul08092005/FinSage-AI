@@ -1,9 +1,12 @@
 """Shared entry point — do not add feature logic here.
 Import from app/agents, app/analytics, app/documents instead."""
 import json
+import logging
 import os
 from typing import Any
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -293,7 +296,8 @@ async def health_score(req: HealthScoreRequest):
         if not df.empty and "date" in df.columns:
             df["date"] = pd.to_datetime(df["date"], errors="coerce")
         return calculate_health_score(df, req.budgets, req.goals, req.total_income)
-    except Exception:
+    except Exception as exc:
+        logger.exception("Failed to calculate health score: %s", exc)
         return {"score": 85, "breakdown": {"budget_adherence": 35, "goals_progress": 26, "spending_stability": 24}}
 
 

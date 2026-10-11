@@ -16,20 +16,25 @@ export async function healthScore(req: AuthedRequest, res: Response) {
   const now = new Date();
   const threeMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 3, 1));
 
-  const [transactions, budgets, goals] = await Promise.all([
+  const [transactions, budgets, goals, user] = await Promise.all([
     prisma.transaction.findMany({
       where: { userId: req.userId, transactionDate: { gte: threeMonthsAgo } },
       orderBy: { transactionDate: "desc" },
     }),
     prisma.budget.findMany({ where: { userId: req.userId } }),
     prisma.goal.findMany({ where: { userId: req.userId } }),
+    prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { monthlySalary: true },
+    }),
   ]);
 
   try {
+    const total_income = user?.monthlySalary ? Number(user.monthlySalary) : undefined;
     const aiRes = await fetch(`${AI_ENGINE_BASE}/internal/analytics/health-score`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ transactions, budgets, goals }),
+      body: JSON.stringify({ transactions, budgets, goals, total_income }),
     });
 
     if (!aiRes.ok) {
