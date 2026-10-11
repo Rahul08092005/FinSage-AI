@@ -1,0 +1,105 @@
+date,description,amount,category
+2026-07-01,House rent - Indiranagar flat,25000,Rent
+2026-07-02,Netflix subscription,649,Subscriptions
+2026-07-02,Spotify Premium,119,Subscriptions
+2026-07-02,Google One storage,130,Subscriptions
+2026-07-03,BESCOM electricity bill,1350,Utilities
+2026-07-05,ACT Fibernet broadband,1179,Utilities
+2026-07-06,Jio mobile recharge,299,Utilities
+2026-07-04,BigBasket weekly groceries,1480,Groceries
+2026-07-11,Blinkit groceries,960,Groceries
+2026-07-18,DMart monthly stock-up,2350,Groceries
+2026-07-25,Zepto fruits and veggies,740,Groceries
+2026-07-05,Swiggy dinner,520,Food & Dining
+2026-07-08,Starbucks coffee,430,Food & Dining
+2026-07-12,Meghana Foods biryani,860,Food & Dining
+2026-07-15,Zomato lunch order,380,Food & Dining
+2026-07-19,Toit Brewpub dinner with friends,1050,Food & Dining
+2026-07-26,Third Wave Coffee,340,Food & Dining
+2026-07-07,Indian Oil petrol,1200,Travel
+2026-07-13,Uber to airport,640,Travel
+2026-07-20,Namma Metro card recharge,500,Travel
+2026-07-27,Rapido bike taxi,160,Travel
+2026-07-14,BookMyShow movie tickets,780,Entertainment
+2026-07-09,Myntra clothes,1499,Shopping
+2026-07-22,Decathlon running shoes,2150,Shopping
+2026-07-28,Amazon phone cover and cable,899,Shopping
+2026-07-16,Apollo Pharmacy medicines,640,Healthcare
+2026-07-21,Salon haircut,450,General
+2026-08-01,House rent - Indiranagar flat,25000,Rent
+2026-08-02,Netflix subscription,649,Subscriptions
+2026-08-02,Spotify Premium,119,Subscriptions
+2026-08-02,Google One storage,130,Subscriptions
+2026-08-03,BESCOM electricity bill,1620,Utilities
+2026-08-05,ACT Fibernet broadband,1179,Utilities
+2026-08-06,Jio mobile recharge,299,Utilities
+2026-08-03,BigBasket weekly groceries,1620,Groceries
+2026-08-10,Blinkit groceries,880,Groceries
+2026-08-17,DMart monthly stock-up,2480,Groceries
+2026-08-24,Zepto fruits and veggies,810,Groceries
+2026-08-04,Swiggy dinner,610,Food & Dining
+2026-08-07,Zomato lunch order,450,Food & Dining
+2026-08-10,Starbucks coffee,460,Food & Dining
+2026-08-14,Truffles burgers,780,Food & Dining
+2026-08-16,Social Offline Sunday brunch,1050,Food & Dining
+2026-08-21,Meghana Foods biryani,920,Food & Dining
+2026-08-29,Third Wave Coffee,360,Food & Dining
+2026-08-30,Zomato team dinner,950,Food & Dining
+2026-08-08,Indian Oil petrol,1250,Travel
+2026-08-15,RedBus Bengaluru to Mysuru,1100,Travel
+2026-08-22,Uber rides,720,Travel
+2026-08-26,Namma Metro card recharge,500,Travel
+2026-08-13,PVR Cinemas movie night,1100,Entertainment
+2026-08-23,Comedy show tickets,1200,Entertainment
+2026-08-11,Nykaa skincare,1350,Shopping
+2026-08-19,Amazon kitchen organiser,1180,Shopping
+2026-08-27,Zudio tshirts,1100,Shopping
+2026-08-12,Practo doctor consultation,800,Healthcare
+2026-08-25,Birthday gift for friend,1500,General
+2026-09-01,House rent - Indiranagar flat,25000,Rent
+2026-09-02,Netflix subscription,649,Subscriptions
+2026-09-02,Spotify Premium,119,Subscriptions
+2026-09-02,Google One storage,130,Subscriptions
+2026-09-03,BESCOM electricity bill,1540,Utilities
+2026-09-05,ACT Fibernet broadband,1179,Utilities
+2026-09-06,Jio mobile recharge,299,Utilities
+2026-09-05,BigBasket weekly groceries,1390,Groceries
+2026-09-12,Blinkit groceries,720,Groceries
+2026-09-19,DMart monthly stock-up,2210,Groceries
+2026-09-26,Zepto fruits and veggies,690,Groceries
+2026-09-06,Swiggy dinner,480,Food & Dining
+2026-09-09,Zomato lunch order,360,Food & Dining
+2026-09-10,Smoke House Deli lunch,1180,Food & Dining
+2026-09-14,Starbucks coffee,410,Food & Dining
+2026-09-20,Meghana Foods biryani,880,Food & Dining
+2026-09-27,Third Wave Coffee,320,Food & Dining
+2026-09-28,Zomato dinner order,540,Food & Dining
+2026-09-07,Indian Oil petrol,1150,Travel
+2026-09-14,Uber rides,560,Travel
+2026-09-21,Namma Metro card recharge,500,Travel
+2026-09-29,Rapido bike taxi,140,Travel
+2026-09-18,BookMyShow movie tickets,720,Entertainment
+2026-09-13,Amazon home decor,1450,Shopping
+2026-09-24,Myntra sneakers,1899,Shopping
+2026-09-16,Apollo Pharmacy medicines,410,Healthcare
+2026-09-22,Salon haircut,450,General
+2026-10-01,House rent - Indiranagar flat,25000,Rent
+2026-10-02,Netflix subscription,649,Subscriptions
+2026-10-02,Spotify Premium,119,Subscriptions
+2026-10-02,Google One storage,130,Subscriptions
+2026-10-03,BESCOM electricity bill,1480,Utilities
+2026-10-05,ACT Fibernet broadband,1179,Utilities
+2026-10-06,Jio mobile recharge,299,Utilities
+2026-10-03,BigBasket weekly groceries,1560,Groceries
+2026-10-04,Swiggy dinner,590,Food & Dining
+2026-10-05,Starbucks coffee,440,Food & Dining
+2026-10-06,Meghana Foods biryani,960,Food & Dining
+2026-10-04,Indian Oil petrol,1300,Travel
+2026-07-04,Cult.fit gym membership,1500,Subscriptions
+2026-07-07,House help monthly salary,3000,General
+2026-08-04,Cult.fit gym membership,1500,Subscriptions
+2026-08-07,House help monthly salary,3000,General
+2026-09-04,Cult.fit gym membership,1500,Subscriptions
+2026-09-07,House help monthly salary,3000,General
+2026-10-04,Cult.fit gym membership,1500,Subscriptions
+2026-10-07,House help monthly salary,3000,General
