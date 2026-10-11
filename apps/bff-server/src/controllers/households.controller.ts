@@ -228,7 +228,7 @@ export async function createHousehold(req: AuthedRequest, res: Response) {
     return res.status(201).json(newHousehold);
   } catch (err: any) {
     console.error("[createHousehold] Error:", err);
-    return res.status(500).json({ error: "Failed to create household" });
+    return res.status(500).json({ error: err?.message || "Failed to create household" });
   }
 }
 
