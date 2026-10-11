@@ -12,10 +12,10 @@ import { requireAuth } from "../middleware/auth.middleware";
 
 // Save uploaded files to the local uploads/ directory (swappable for S3 later)
 const storage = multer.diskStorage({
-  destination(_req, _file, cb) {
+  destination(_req: any, _file: any, cb: any) {
     cb(null, path.join(__dirname, "../../uploads"));
   },
-  filename(_req, file, cb) {
+  filename(_req: any, file: any, cb: any) {
     const unique = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
     cb(null, `${unique}-${file.originalname}`);
   },
